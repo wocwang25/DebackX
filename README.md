@@ -1,19 +1,38 @@
-# Image Text Translation Pipeline
+# IIMT English-Vietnamese Pipeline
 
-This workspace has been pivoted away from end-to-end DebackX training.
-
-The new direction is a modular pipeline:
+This project follows a modular In-Image Machine Translation pipeline:
 
 ```text
 image with English text
--> detect/crop text region
--> OCR English text
--> translate English to Vietnamese with an external MT model
--> remove old text / use clean background
+-> crop or detect text region
+-> recognize English text with OCR
+-> translate English text to Vietnamese
+-> use clean background or inpaint old text
 -> render Vietnamese text back into the image
 ```
 
-The current dataset root is `IIMT30k_Vi/Arial`.
+The active dataset root is `IIMT30k_Vi/Arial`.
+
+## What Gets Trained
+
+`OCR`
+
+Fine-tune TrOCR on cropped English text regions from `IIMT30k_Vi/Arial/{train,val}/en`.
+
+`Translation`
+
+Fine-tune NLLB for English to Vietnamese using:
+
+```text
+IIMT30k_Vi/Arial/train/en/subtitle.txt
+IIMT30k_Vi/Arial/train/vi/subtitle.txt
+IIMT30k_Vi/Arial/val/en/subtitle.txt
+IIMT30k_Vi/Arial/val/vi/subtitle.txt
+```
+
+`Rendering`
+
+Rendering text back into the image is not trained. It is a deterministic post-processing step controlled by `configs/config-pipeline.json`.
 
 ## Dataset
 
@@ -31,14 +50,7 @@ IIMT30k_Vi/Arial/{train,val,test}/vi/subtitle.txt
 IIMT30k_Vi/Arial/{train,val,test}/vi/pos.txt
 ```
 
-Vietnamese subtitles have been cleaned and re-tokenized with:
-
-```text
-IIMT30k_Vi/Arial/spm/vi.model
-IIMT30k_Vi/Arial/spm/vi.vocab
-```
-
-Backups are kept with `.bak` suffix.
+The active training scripts use `subtitle.txt` and `pos.txt`. Tokenized files can stay in the dataset, but they are not required for the current OCR + MT pipeline.
 
 ## Configuration
 
@@ -48,7 +60,38 @@ Main config:
 configs/config-pipeline.json
 ```
 
-It controls dataset paths, OCR crop output, translation backend notes, inpainting mode, and render style.
+Important outputs:
+
+```text
+outputs/ocr/en/{train,val,test}/images
+outputs/ocr/en/{train,val,test}/labels.tsv
+outputs/ocr/en/test.pred.en.txt
+models/ocr-trocr-en/best
+models/mt-nllb-en-vi/best
+outputs/mt/test.pred.vi.txt
+outputs/rendered/test/vi/image
+```
+
+## A100 Setup
+
+Use Python 3.10 or 3.11 for the pinned PyTorch/Transformers stack.
+
+Create a Python environment on the GPU machine:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+```
+
+Check whether the machine and dataset are ready:
+
+```bash
+sh scripts/check-training-env.sh
+```
+
+The config is already set to use `bf16`, which is suitable for A100.
 
 ## Prepare OCR Data
 
@@ -58,44 +101,64 @@ Create text crops and OCR labels from `en/image`, `en/pos.txt`, and `en/subtitle
 sh scripts/prepare-ocr-dataset.sh
 ```
 
-Outputs:
+`scripts/train-ocr.sh` also runs this preparation step automatically.
 
-```text
-outputs/ocr/en/{train,val,test}/images
-outputs/ocr/en/{train,val,test}/labels.tsv
+## Train
+
+Train the English to Vietnamese translation model:
+
+```bash
+sh scripts/train-translation.sh
 ```
 
-These files can be used to fine-tune an OCR recognizer, or you can start with a pretrained OCR engine such as PaddleOCR or EasyOCR.
+Train the English OCR model:
 
-## Render Benchmark
+```bash
+sh scripts/train-ocr.sh
+```
 
-Render Vietnamese subtitles back onto clean backgrounds. This is an oracle benchmark for the final "insert translated text" stage:
+Checkpoints and metrics are saved under:
+
+```text
+models/mt-nllb-en-vi
+models/ocr-trocr-en
+```
+
+## Generate Translated Images
+
+Run OCR on the test crops:
+
+```bash
+CHECKPOINT=models/ocr-trocr-en/best SPLIT=test sh scripts/predict-ocr.sh
+```
+
+Translate the OCR text to Vietnamese:
+
+```bash
+INPUT=outputs/ocr/en/test.pred.en.txt CHECKPOINT=models/mt-nllb-en-vi/best SPLIT=test sh scripts/predict-translation.sh
+```
+
+Render the generated Vietnamese text onto clean test backgrounds:
+
+```bash
+sh scripts/render-translations.sh --split test --translations outputs/mt/test.pred.vi.txt
+```
+
+For an oracle render benchmark with ground-truth Vietnamese subtitles:
 
 ```bash
 sh scripts/render-translations.sh --split test
 ```
 
-Outputs:
-
-```text
-outputs/rendered/test/vi/image
-```
-
-To render model-generated translations instead of ground truth Vietnamese subtitles:
+For an MT-only benchmark that skips OCR and translates ground-truth English subtitles:
 
 ```bash
-sh scripts/render-translations.sh --split test --translations path/to/predicted.vi.txt
+CHECKPOINT=models/mt-nllb-en-vi/best SPLIT=test sh scripts/predict-translation.sh
+sh scripts/render-translations.sh --split test --translations outputs/mt/test.pred.vi.txt
 ```
 
-The translation file must contain one line per image in numeric filename order.
+## Practical Notes
 
-## Practical Training Order
+For the graduation project, the trainable parts are OCR and machine translation. The full system still satisfies the IIMT goal because it recognizes text inside images, translates it, and reconstructs a translated image.
 
-1. Prepare OCR crops with `scripts/prepare-ocr-dataset.sh`.
-2. Fine-tune or choose an OCR backend.
-3. Use an external MT model for `en -> vi`, optionally fine-tuned on `IIMT30k_Vi/Arial/train/{en,vi}/subtitle.txt`.
-4. For benchmark images, use `background` as the clean canvas.
-5. For real images, use OCR boxes to create masks and inpaint with a model such as LaMa.
-6. Render Vietnamese text with `scripts/render-translations.sh`.
-
-The old DebackX model code is left in `src/` only as reference. The active project flow is controlled by `configs/config-pipeline.json`.
+For real-world images that do not have clean `background` files, add an inpainting model such as LaMa and use OCR boxes as masks before rendering the Vietnamese text.

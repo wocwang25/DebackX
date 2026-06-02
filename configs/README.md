@@ -14,11 +14,11 @@ Controls the IIMT-style dataset root, split names, language names, and image siz
 
 `ocr`
 
-Controls OCR crop generation. `train_output_dir` receives cropped text regions and `labels.tsv` files.
+Controls OCR crop generation and TrOCR fine-tuning. `train_output_dir` receives cropped text regions and `labels.tsv` files. `checkpoint_dir` receives the fine-tuned OCR model.
 
 `translation`
 
-Documents the external machine-translation backend. The repo no longer trains DebackX's visual translation transformer as the main path.
+Controls NLLB fine-tuning for English to Vietnamese subtitle translation. `checkpoint_dir` receives the fine-tuned MT model.
 
 `inpainting`
 
@@ -27,3 +27,18 @@ For benchmark/evaluation on `IIMT30k_Vi`, clean backgrounds are available in the
 `render`
 
 Controls font, text color, box color, opacity, padding, and output directory for inserting Vietnamese text back into images.
+
+## Training Defaults
+
+The current defaults target an A100 GPU:
+
+```text
+ocr.precision = bf16
+translation.precision = bf16
+```
+
+Run the preflight check before training:
+
+```bash
+sh scripts/check-training-env.sh
+```
