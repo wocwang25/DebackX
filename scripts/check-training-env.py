@@ -65,7 +65,7 @@ def check_cuda():
 
 
 def check_dependencies():
-    for name in ["transformers", "PIL", "sentencepiece", "sacrebleu", "cv2", "tqdm"]:
+    for name in ["transformers", "PIL", "sentencepiece", "sacrebleu", "cv2", "easyocr", "tqdm"]:
         ok, version = check_module(name)
         status = "ok" if ok else "missing"
         print(f"[{status}] {name}: {version}")
@@ -120,6 +120,22 @@ def check_render(config):
         print(f"[warn] render font missing: {font_path}")
 
 
+def check_real_image(config, config_path):
+    real_config = config.get("real_image", {})
+    if not real_config:
+        return
+
+    for label, key in [("ocr checkpoint", "ocr_checkpoint"), ("mt checkpoint", "mt_checkpoint")]:
+        checkpoint = resolve(config_path, real_config[key])
+        if checkpoint.exists():
+            print(f"[ok] real-image {label}: {checkpoint}")
+        else:
+            print(f"[warn] real-image {label} missing until training finishes: {checkpoint}")
+
+    output_dir = resolve(config_path, real_config["output_dir"])
+    print(f"[info] real-image output dir: {output_dir}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Check whether the IIMT training workspace is ready.")
     parser.add_argument("--config", default="configs/config-pipeline.json")
@@ -134,6 +150,7 @@ def main():
     check_dataset(config, config_path)
     check_ocr_labels(config, config_path)
     check_render(config)
+    check_real_image(config, config_path)
 
 
 if __name__ == "__main__":

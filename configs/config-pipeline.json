@@ -57,6 +57,25 @@
         "real_image_model": "LaMa",
         "mask_from": "ocr_text_box"
     },
+    "real_image": {
+        "detector": "easyocr",
+        "detector_languages": ["en"],
+        "detector_gpu": true,
+        "detector_text_threshold": 0.5,
+        "detector_low_text": 0.3,
+        "detector_link_threshold": 0.4,
+        "detector_width_ths": 0.7,
+        "min_confidence": 0.1,
+        "box_padding": 4,
+        "mask_dilation": 5,
+        "inpaint_backend": "opencv_telea",
+        "inpaint_radius": 3,
+        "ocr_checkpoint": "../models/ocr-trocr-en/best",
+        "mt_checkpoint": "../models/mt-nllb-en-vi/best",
+        "output_dir": "../outputs/real_images",
+        "metadata_suffix": ".json",
+        "note": "Inference path for user-uploaded images: detect text boxes, OCR, translate, inpaint old text, then render Vietnamese."
+    },
     "render": {
         "font_path": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "min_font_size": 8,

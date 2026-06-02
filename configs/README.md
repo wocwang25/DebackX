@@ -24,6 +24,10 @@ Controls NLLB fine-tuning for English to Vietnamese subtitle translation. `check
 
 For benchmark/evaluation on `IIMT30k_Vi`, clean backgrounds are available in the dataset. For real images, use an inpainting model such as LaMa with masks from OCR boxes.
 
+`real_image`
+
+Controls the deployable worker path for user-uploaded images. It uses EasyOCR for text detection, the fine-tuned TrOCR checkpoint for recognition, the fine-tuned NLLB checkpoint for translation, OpenCV inpainting to remove old text, and the render config to insert Vietnamese text.
+
 `render`
 
 Controls font, text color, box color, opacity, padding, and output directory for inserting Vietnamese text back into images.

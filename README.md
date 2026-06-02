@@ -70,6 +70,7 @@ models/ocr-trocr-en/best
 models/mt-nllb-en-vi/best
 outputs/mt/test.pred.vi.txt
 outputs/rendered/test/vi/image
+outputs/real_images
 ```
 
 ## A100 Setup
@@ -157,8 +158,37 @@ CHECKPOINT=models/mt-nllb-en-vi/best SPLIT=test sh scripts/predict-translation.s
 sh scripts/render-translations.sh --split test --translations outputs/mt/test.pred.vi.txt
 ```
 
+## Translate A Real Image
+
+After both checkpoints exist, run the deployable worker path on a user image:
+
+```bash
+sh scripts/translate-image.sh --input path/to/english-image.jpg
+```
+
+Default outputs:
+
+```text
+outputs/real_images/english-image.vi.png       # final translated image
+outputs/real_images/english-image.vi.mask.png  # text-removal mask
+outputs/real_images/english-image.vi.png.json  # boxes, OCR text, translations
+```
+
+This path adds the two parts that the dataset benchmark does not need:
+
+```text
+EasyOCR text detection -> finds text boxes in the uploaded image
+OpenCV inpainting -> removes the original English text before rendering Vietnamese
+```
+
+You can choose the output path manually:
+
+```bash
+sh scripts/translate-image.sh --input path/to/english-image.jpg --output outputs/real_images/result.png
+```
+
 ## Practical Notes
 
 For the graduation project, the trainable parts are OCR and machine translation. The full system still satisfies the IIMT goal because it recognizes text inside images, translates it, and reconstructs a translated image.
 
-For real-world images that do not have clean `background` files, add an inpainting model such as LaMa and use OCR boxes as masks before rendering the Vietnamese text.
+For real-world images that do not have clean `background` files, `scripts/translate-image.sh` uses OCR boxes as masks and OpenCV inpainting as the baseline text-removal method. A stronger inpainting model such as LaMa can replace this later for better visual quality.
