@@ -1,0 +1,43 @@
+{
+    "dataset": {
+        "root": "../IIMT30k_Vi/Arial",
+        "splits": ["train", "val", "test"],
+        "source_lang": "en",
+        "target_lang": "vi",
+        "image_size": [512, 48]
+    },
+    "ocr": {
+        "task": "recognize_text_inside_known_or_detected_box",
+        "train_output_dir": "../outputs/ocr/en",
+        "crop_padding": 2,
+        "label_file": "labels.tsv",
+        "backend": "paddleocr_or_easyocr",
+        "note": "Use prepared crops and labels to fine-tune an OCR recognizer, or use a pretrained OCR backend first."
+    },
+    "translation": {
+        "backend": "external_mt",
+        "recommended_model": "facebook/nllb-200-distilled-600M",
+        "source_code": "eng_Latn",
+        "target_code": "vie_Latn",
+        "finetune_parallel_source": "../IIMT30k_Vi/Arial/train/en/subtitle.txt",
+        "finetune_parallel_target": "../IIMT30k_Vi/Arial/train/vi/subtitle.txt",
+        "note": "Translation is no longer trained by DebackX codebook/transformer. Use an MT model and optionally fine-tune it on En-Vi text."
+    },
+    "inpainting": {
+        "backend": "dataset_background_for_benchmark_or_lama_for_real_images",
+        "benchmark_background_dir": "{dataset_root}/{split}/background",
+        "real_image_model": "LaMa",
+        "mask_from": "ocr_text_box"
+    },
+    "render": {
+        "font_path": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "min_font_size": 8,
+        "max_font_size": 24,
+        "text_color": [255, 255, 255],
+        "box_color": [0, 0, 0],
+        "box_alpha": 0.55,
+        "horizontal_padding": 4,
+        "vertical_padding": 2,
+        "output_dir": "../outputs/rendered"
+    }
+}

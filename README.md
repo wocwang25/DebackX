@@ -1,137 +1,101 @@
-# DebackX
+# Image Text Translation Pipeline
 
-Source code of paper "Exploring In-Image Machine Translation with Real-World Background" (ACL 2025 Findings) [![arXiv](https://img.shields.io/badge/arXiv-2505.15282-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2505.15282).
+This workspace has been pivoted away from end-to-end DebackX training.
 
-<p align="center">
-  <img src="./img/example1.png" alt="example1" style="width:400px;"/>
-</p>
+The new direction is a modular pipeline:
 
-
-## 📦 Dataset
-
-Download the **IIMT30k** dataset from [![HuggingFace](https://img.shields.io/badge/HuggingFace-IIMT30k-ffd700?logo=huggingface&logoColor=yellow)](https://huggingface.co/datasets/yztian/IIMT30k)
-
----
-
-## 🏗️ Model Overview
-
-The `DebackX` model is composed of **three main modules**:
-
-1. **Text-Image Background Separation Model**  
-2. **Image Translation Model**  
-3. **Text-Image Background Fusion Model**
-
-<p align="center">
-  <img src="./img/model.png" alt="model" style="width:400px;"/>
-</p>
-
-Follow the instructions below to train each module.
-
----
-
-## 🔧 Training
-
-### 1️⃣ Text-Image Background Separation Model
-
-1. Complete the configuration file: `./config/config-separate.json`  
-2. Start training:
-
-```bash
-cd scripts
-sh train-separate.sh
+```text
+image with English text
+-> detect/crop text region
+-> OCR English text
+-> translate English to Vietnamese with an external MT model
+-> remove old text / use clean background
+-> render Vietnamese text back into the image
 ```
 
----
+The current dataset root is `IIMT30k_Vi/Arial`.
 
-### 2️⃣ Image Translation Model
+## Dataset
 
-#### Step I: Codebook Training
+Expected structure:
 
-1. Complete the configuration: `./config/config-codebook.json`  
-2. Start training:
-
-```bash
-cd scripts
-sh train-codebook.sh
+```text
+IIMT30k_Vi/Arial/{train,val,test}/background
+IIMT30k_Vi/Arial/{train,val,test}/en/image
+IIMT30k_Vi/Arial/{train,val,test}/en/text
+IIMT30k_Vi/Arial/{train,val,test}/en/subtitle.txt
+IIMT30k_Vi/Arial/{train,val,test}/en/pos.txt
+IIMT30k_Vi/Arial/{train,val,test}/vi/image
+IIMT30k_Vi/Arial/{train,val,test}/vi/text
+IIMT30k_Vi/Arial/{train,val,test}/vi/subtitle.txt
+IIMT30k_Vi/Arial/{train,val,test}/vi/pos.txt
 ```
 
----
+Vietnamese subtitles have been cleaned and re-tokenized with:
 
-#### Step II: Translation Training
-
-1. After codebook training, **decode images to code sequences**:
-
-```bash
-cd scripts
-# Before decoding, make sure to:
-# - Set the correct config and checkpoint paths
-# - Set input_textimg_dir and output paths
-sh decode-codebook.sh
+```text
+IIMT30k_Vi/Arial/spm/vi.model
+IIMT30k_Vi/Arial/spm/vi.vocab
 ```
 
-2. Fill in the configuration file: `./config/config-translation.json`  
-3. Train the translation model:
+Backups are kept with `.bak` suffix.
 
-```bash
-cd scripts
-sh train-translation.sh
+## Configuration
+
+Main config:
+
+```text
+configs/config-pipeline.json
 ```
 
-<details>
-<summary>📚 Optional: Pre-training for Translation</summary>
+It controls dataset paths, OCR crop output, translation backend notes, inpainting mode, and render style.
 
-We provide code to construct synthetic text-images for pre-training.
+## Prepare OCR Data
 
-1. Edit `build_text_img.py`:  
-   - Replace font paths and parallel text paths.
-
-2. Tokenize texts using SentencePiece:
+Create text crops and OCR labels from `en/image`, `en/pos.txt`, and `en/subtitle.txt`:
 
 ```bash
-spm_encode --model=./scripts/multi30k.model --output_format=piece --extra_options=bos:eos < path/to/texts > path/to/tokenized/texts/subtitle.tok.txt
-
-spm_encode --model=./scripts/multi30k.model --output_format=id --extra_options=bos:eos < path/to/texts > path/to/tokenized/texts/subtitle.tok.id.txt
+sh scripts/prepare-ocr-dataset.sh
 ```
 
-3. Train on the synthetic data as in Step II.
+Outputs:
 
-4. Finetune on IIMT30k. In `config-translation.json`, set `"load_pretrain"` to the pre-trained model path.
-</details>
+```text
+outputs/ocr/en/{train,val,test}/images
+outputs/ocr/en/{train,val,test}/labels.tsv
+```
 
----
+These files can be used to fine-tune an OCR recognizer, or you can start with a pretrained OCR engine such as PaddleOCR or EasyOCR.
 
-### 3️⃣ Text-Image Background Fusion Model
+## Render Benchmark
 
-1. Complete the configuration: `./config/config-fuse.json`  
-2. Start training:
+Render Vietnamese subtitles back onto clean backgrounds. This is an oracle benchmark for the final "insert translated text" stage:
 
 ```bash
-cd scripts
-sh train-fuse.sh
+sh scripts/render-translations.sh --split test
 ```
 
----
+Outputs:
 
-## 📤 Decode and Evaluate
+```text
+outputs/rendered/test/vi/image
+```
 
-After training all three models, generate the translated results:
+To render model-generated translations instead of ground truth Vietnamese subtitles:
 
 ```bash
-cd scripts
-# Before running, ensure all config and checkpoint paths are correct
-# Set appropriate input/output directories
-sh decode-separate.sh
-sh decode-translation.sh
-sh decode-fuse.sh
+sh scripts/render-translations.sh --split test --translations path/to/predicted.vi.txt
 ```
 
-Evaluate the generated images using OCR (EasyOCR):
+The translation file must contain one line per image in numeric filename order.
 
-```bash
-cd scripts
-# Make sure to update `img_dir` and `result_file` in ocr.py
-python ocr.py
-```
+## Practical Training Order
 
----
-# DebackX
+1. Prepare OCR crops with `scripts/prepare-ocr-dataset.sh`.
+2. Fine-tune or choose an OCR backend.
+3. Use an external MT model for `en -> vi`, optionally fine-tuned on `IIMT30k_Vi/Arial/train/{en,vi}/subtitle.txt`.
+4. For benchmark images, use `background` as the clean canvas.
+5. For real images, use OCR boxes to create masks and inpaint with a model such as LaMa.
+6. Render Vietnamese text with `scripts/render-translations.sh`.
+
+The old DebackX model code is left in `src/` only as reference. The active project flow is controlled by `configs/config-pipeline.json`.

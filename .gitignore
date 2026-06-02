@@ -1,4 +1,13 @@
 .DS_Store
+__MACOSX/
+IIMT30k_Vi.zip
+IIMT30k_Vi/
+outputs/
+models/
+results/
+tb/
+logs/
+cleaning/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

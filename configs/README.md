@@ -1,60 +1,29 @@
-## 📝 Notes on Multi-Font Training
+# Pipeline Config
 
-> 💡 **Note**: If you plan to train a model that **supports various fonts**, please **merge** the following components from each training set (e.g., *Times New Roman*, *Arial*, *Calibri*) into unified folders:
->
-> - Source images  
-> - Target images  
-> - Source text images  
-> - Target text images  
-> - Background images
+The active configuration is:
 
----
+```text
+configs/config-pipeline.json
+```
 
-## ⚙️ Configuration File Descriptions
+## Sections
 
-### `config-separate.json`
+`dataset`
 
-- `"train_src_img_path"` / `"train_tgt_img_path"`:  
-  Path to the folders containing **source** / **target** images.
+Controls the IIMT-style dataset root, split names, language names, and image size.
 
-- `"train_src_text_img_path"` / `"train_tgt_text_img_path"`:  
-  Path to the **source** / **target** text images.
+`ocr`
 
-- `"train_background_img_path"`:  
-  Path to the **background** images.
+Controls OCR crop generation. `train_output_dir` receives cropped text regions and `labels.tsv` files.
 
-- `"load_checkpoint"`:  
-  Path to a previously saved checkpoint if resuming training.
+`translation`
 
-- `"save_checkpoint_dir"`:  
-  Directory where model checkpoints will be saved during training.
+Documents the external machine-translation backend. The repo no longer trains DebackX's visual translation transformer as the main path.
 
----
+`inpainting`
 
-### `config-codebook.json`
+For benchmark/evaluation on `IIMT30k_Vi`, clean backgrounds are available in the dataset. For real images, use an inpainting model such as LaMa with masks from OCR boxes.
 
-- Configuration is **identical** to `config-separate.json`.
+`render`
 
----
-
-### `config-translation.json`
-
-- `"train_src_code_path"` / `"train_tgt_code_path"`:  
-  Paths to the decoded **code sequence files** generated from text images using  
-  `DebackX/scripts/decode-codebook.sh`.
-
-- `"train_text_path"`:  
-  Path to **tokenized text ID files**, which include tokenized IDs of the target texts.
-
-- `"text_sp"`:  
-  Path to the **SentencePiece model** used for tokenization.
-
-- `"load_pretrain"` *(optional)*:  
-  If you're fine-tuning on IIMT30k after pre-training with a large-scale synthetic text-image dataset, specify the path to the pre-trained checkpoint here.
-
----
-
-### `config-fuse.json`
-
-- Configuration is **identical** to `config-separate.json`.
-
+Controls font, text color, box color, opacity, padding, and output directory for inserting Vietnamese text back into images.
