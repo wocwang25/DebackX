@@ -28,6 +28,10 @@ For benchmark/evaluation on `IIMT30k_Vi`, clean backgrounds are available in the
 
 Controls the deployable worker path for user-uploaded images. It uses EasyOCR for text detection, the fine-tuned TrOCR checkpoint for recognition, the fine-tuned NLLB checkpoint for translation, OpenCV inpainting to remove old text, and the render config to insert Vietnamese text.
 
+`worker`
+
+Controls the FastAPI backend worker: upload limit, output directory, allowed image extensions, and whether OCR/MT models are loaded during startup.
+
 `render`
 
 Controls font, text color, box color, opacity, padding, and output directory for inserting Vietnamese text back into images.

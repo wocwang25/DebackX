@@ -34,11 +34,6 @@ def resolve_path_from_cwd(path):
     return (Path.cwd() / path).resolve()
 
 
-def default_output_path(config_path, config, input_path):
-    output_dir = output_path(config_path, config["real_image"]["output_dir"])
-    return output_dir / f"{input_path.stem}.vi.png"
-
-
 def polygon_to_box(polygon):
     points = np.array(polygon, dtype=np.float32)
     x1 = float(points[:, 0].min())
@@ -50,42 +45,6 @@ def polygon_to_box(polygon):
 
 def normalize_polygon(raw_polygon):
     return [[float(point[0]), float(point[1])] for point in raw_polygon]
-
-
-def detect_text_regions(image_path, real_config):
-    reader = easyocr.Reader(
-        real_config.get("detector_languages", ["en"]),
-        gpu=bool(real_config.get("detector_gpu", True)) and torch.cuda.is_available(),
-    )
-    detections = reader.readtext(
-        str(image_path),
-        detail=1,
-        paragraph=False,
-        text_threshold=float(real_config.get("detector_text_threshold", 0.5)),
-        low_text=float(real_config.get("detector_low_text", 0.3)),
-        link_threshold=float(real_config.get("detector_link_threshold", 0.4)),
-        width_ths=float(real_config.get("detector_width_ths", 0.7)),
-    )
-
-    min_confidence = float(real_config.get("min_confidence", 0.0))
-    regions = []
-    for index, item in enumerate(detections):
-        polygon, detector_text, confidence = item
-        confidence = float(confidence)
-        if confidence < min_confidence:
-            continue
-        normalized_polygon = normalize_polygon(polygon)
-        regions.append(
-            {
-                "index": index,
-                "polygon": normalized_polygon,
-                "box": polygon_to_box(normalized_polygon),
-                "detector_text": detector_text,
-                "detector_confidence": confidence,
-            }
-        )
-    regions.sort(key=lambda region: (region["box"][1], region["box"][0]))
-    return regions
 
 
 class CropDataset(Dataset):
@@ -114,48 +73,6 @@ class OcrCollator:
         }
 
 
-@torch.no_grad()
-def recognize_regions(image, regions, config, config_path):
-    if not regions:
-        return []
-
-    real_config = config["real_image"]
-    ocr_config = config["ocr"]
-    checkpoint = resolve_from_config(config_path, real_config["ocr_checkpoint"])
-    if not checkpoint.exists():
-        raise FileNotFoundError(f"OCR checkpoint not found: {checkpoint}. Train OCR first.")
-
-    processor = TrOCRProcessor.from_pretrained(checkpoint)
-    model = VisionEncoderDecoderModel.from_pretrained(checkpoint)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device).eval()
-
-    dataset = CropDataset(image, regions, int(real_config.get("box_padding", 0)))
-    dataloader = DataLoader(
-        dataset,
-        batch_size=ocr_config["eval_batch_size"],
-        shuffle=False,
-        collate_fn=OcrCollator(processor),
-        pin_memory=torch.cuda.is_available(),
-    )
-
-    predictions = [""] * len(regions)
-    precision = ocr_config.get("precision", "bf16")
-    amp_dtype = precision_dtype(precision)
-    for batch in tqdm(dataloader, desc="ocr"):
-        pixel_values = batch["pixel_values"].to(device)
-        with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp(precision)):
-            generated = model.generate(
-                pixel_values,
-                max_length=ocr_config["max_target_length"],
-                num_beams=4,
-            )
-        decoded = processor.batch_decode(generated, skip_special_tokens=True)
-        for index, text in zip(batch["indexes"], decoded):
-            predictions[index] = text.strip()
-    return predictions
-
-
 class TextDataset(Dataset):
     def __init__(self, lines):
         self.lines = lines
@@ -165,47 +82,6 @@ class TextDataset(Dataset):
 
     def __getitem__(self, index):
         return self.lines[index]
-
-
-@torch.no_grad()
-def translate_texts(texts, config, config_path):
-    if not texts:
-        return []
-
-    real_config = config["real_image"]
-    mt_config = config["translation"]
-    checkpoint = resolve_from_config(config_path, real_config["mt_checkpoint"])
-    if not checkpoint.exists():
-        raise FileNotFoundError(f"MT checkpoint not found: {checkpoint}. Train translation first.")
-
-    tokenizer = AutoTokenizer.from_pretrained(checkpoint)
-    model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint)
-    tokenizer.src_lang = mt_config["source_code"]
-    tokenizer.tgt_lang = mt_config["target_code"]
-    forced_bos_token_id = tokenizer.convert_tokens_to_ids(mt_config["target_code"])
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device).eval()
-
-    dataloader = DataLoader(TextDataset(texts), batch_size=mt_config["eval_batch_size"], shuffle=False)
-    translations = []
-    for batch in tqdm(dataloader, desc="translate"):
-        encoded = tokenizer(
-            list(batch),
-            max_length=mt_config["max_source_length"],
-            truncation=True,
-            padding=True,
-            return_tensors="pt",
-        )
-        encoded = {key: value.to(device) for key, value in encoded.items()}
-        generated = model.generate(
-            **encoded,
-            max_length=mt_config["max_target_length"],
-            num_beams=mt_config["num_beams"],
-            forced_bos_token_id=forced_bos_token_id,
-        )
-        translations.extend(tokenizer.batch_decode(generated, skip_special_tokens=True))
-    return [translation.strip() for translation in translations]
 
 
 def make_mask(image_size, regions, real_config):
@@ -250,49 +126,236 @@ def write_metadata(path, payload):
         json.dump(payload, metadata_file, ensure_ascii=False, indent=2)
 
 
-def process_image(config_path, input_path, output, metadata):
-    config, config_file = load_config(config_path)
-    input_path = resolve_path_from_cwd(input_path)
-    output_path = resolve_path_from_cwd(output) if output else default_output_path(config_file, config, input_path)
-    metadata_path = (
-        resolve_path_from_cwd(metadata)
-        if metadata
-        else output_path.with_suffix(output_path.suffix + config["real_image"].get("metadata_suffix", ".json"))
-    )
+class RealImageTranslator:
+    def __init__(self, config_path, lazy=False):
+        self.config, self.config_file = load_config(config_path)
+        self.real_config = self.config["real_image"]
+        self.ocr_config = self.config["ocr"]
+        self.mt_config = self.config["translation"]
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    with Image.open(input_path) as opened:
-        image = opened.convert("RGB")
+        self.detector = None
+        self.ocr_processor = None
+        self.ocr_model = None
+        self.mt_tokenizer = None
+        self.mt_model = None
+        self.mt_forced_bos_token_id = None
 
-    regions = detect_text_regions(input_path, config["real_image"])
-    ocr_texts = recognize_regions(image, regions, config, config_file)
-    translations = translate_texts(ocr_texts, config, config_file)
-    clean_image, mask = inpaint_image(image, regions, config["real_image"])
-    rendered = render_regions(clean_image, regions, translations, config["render"])
+        if not lazy:
+            self.load()
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    rendered.save(output_path)
+    @property
+    def output_dir(self):
+        return output_path(self.config_file, self.real_config["output_dir"])
 
-    mask_path = output_path.with_suffix(".mask.png")
-    Image.fromarray(mask).save(mask_path)
+    @property
+    def ocr_checkpoint(self):
+        return resolve_from_config(self.config_file, self.real_config["ocr_checkpoint"])
 
-    for region, ocr_text, translation in zip(regions, ocr_texts, translations):
-        region["ocr_text"] = ocr_text
-        region["translation"] = translation
+    @property
+    def mt_checkpoint(self):
+        return resolve_from_config(self.config_file, self.real_config["mt_checkpoint"])
 
-    write_metadata(
-        metadata_path,
-        {
+    def default_output_path(self, input_path):
+        return self.output_dir / f"{input_path.stem}.vi.png"
+
+    def health(self):
+        return {
+            "device": str(self.device),
+            "cuda_available": torch.cuda.is_available(),
+            "ocr_checkpoint": str(self.ocr_checkpoint),
+            "ocr_checkpoint_exists": self.ocr_checkpoint.exists(),
+            "mt_checkpoint": str(self.mt_checkpoint),
+            "mt_checkpoint_exists": self.mt_checkpoint.exists(),
+            "models_loaded": self.models_loaded,
+            "output_dir": str(self.output_dir),
+        }
+
+    @property
+    def models_loaded(self):
+        return all(
+            item is not None
+            for item in [
+                self.detector,
+                self.ocr_processor,
+                self.ocr_model,
+                self.mt_tokenizer,
+                self.mt_model,
+            ]
+        )
+
+    def load(self):
+        self.load_detector()
+        self.load_ocr()
+        self.load_mt()
+
+    def load_detector(self):
+        if self.detector is not None:
+            return
+        self.detector = easyocr.Reader(
+            self.real_config.get("detector_languages", ["en"]),
+            gpu=bool(self.real_config.get("detector_gpu", True)) and torch.cuda.is_available(),
+        )
+
+    def load_ocr(self):
+        if self.ocr_model is not None and self.ocr_processor is not None:
+            return
+        checkpoint = self.ocr_checkpoint
+        if not checkpoint.exists():
+            raise FileNotFoundError(f"OCR checkpoint not found: {checkpoint}. Train OCR first.")
+        self.ocr_processor = TrOCRProcessor.from_pretrained(checkpoint)
+        self.ocr_model = VisionEncoderDecoderModel.from_pretrained(checkpoint)
+        self.ocr_model.to(self.device).eval()
+
+    def load_mt(self):
+        if self.mt_model is not None and self.mt_tokenizer is not None:
+            return
+        checkpoint = self.mt_checkpoint
+        if not checkpoint.exists():
+            raise FileNotFoundError(f"MT checkpoint not found: {checkpoint}. Train translation first.")
+        self.mt_tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+        self.mt_model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint)
+        self.mt_tokenizer.src_lang = self.mt_config["source_code"]
+        self.mt_tokenizer.tgt_lang = self.mt_config["target_code"]
+        self.mt_forced_bos_token_id = self.mt_tokenizer.convert_tokens_to_ids(self.mt_config["target_code"])
+        self.mt_model.to(self.device).eval()
+
+    def detect_text_regions(self, image_path):
+        self.load_detector()
+        detections = self.detector.readtext(
+            str(image_path),
+            detail=1,
+            paragraph=False,
+            text_threshold=float(self.real_config.get("detector_text_threshold", 0.5)),
+            low_text=float(self.real_config.get("detector_low_text", 0.3)),
+            link_threshold=float(self.real_config.get("detector_link_threshold", 0.4)),
+            width_ths=float(self.real_config.get("detector_width_ths", 0.7)),
+        )
+
+        min_confidence = float(self.real_config.get("min_confidence", 0.0))
+        regions = []
+        for index, item in enumerate(detections):
+            polygon, detector_text, confidence = item
+            confidence = float(confidence)
+            if confidence < min_confidence:
+                continue
+            normalized_polygon = normalize_polygon(polygon)
+            regions.append(
+                {
+                    "index": index,
+                    "polygon": normalized_polygon,
+                    "box": polygon_to_box(normalized_polygon),
+                    "detector_text": detector_text,
+                    "detector_confidence": confidence,
+                }
+            )
+        regions.sort(key=lambda region: (region["box"][1], region["box"][0]))
+        return regions
+
+    @torch.no_grad()
+    def recognize_regions(self, image, regions):
+        if not regions:
+            return []
+        self.load_ocr()
+
+        dataset = CropDataset(image, regions, int(self.real_config.get("box_padding", 0)))
+        dataloader = DataLoader(
+            dataset,
+            batch_size=self.ocr_config["eval_batch_size"],
+            shuffle=False,
+            collate_fn=OcrCollator(self.ocr_processor),
+            pin_memory=torch.cuda.is_available(),
+        )
+
+        predictions = [""] * len(regions)
+        precision = self.ocr_config.get("precision", "bf16")
+        amp_dtype = precision_dtype(precision)
+        for batch in tqdm(dataloader, desc="ocr"):
+            pixel_values = batch["pixel_values"].to(self.device)
+            with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp(precision)):
+                generated = self.ocr_model.generate(
+                    pixel_values,
+                    max_length=self.ocr_config["max_target_length"],
+                    num_beams=4,
+                )
+            decoded = self.ocr_processor.batch_decode(generated, skip_special_tokens=True)
+            for index, text in zip(batch["indexes"], decoded):
+                predictions[index] = text.strip()
+        return predictions
+
+    @torch.no_grad()
+    def translate_texts(self, texts):
+        if not texts:
+            return []
+        self.load_mt()
+
+        dataloader = DataLoader(TextDataset(texts), batch_size=self.mt_config["eval_batch_size"], shuffle=False)
+        translations = []
+        for batch in tqdm(dataloader, desc="translate"):
+            encoded = self.mt_tokenizer(
+                list(batch),
+                max_length=self.mt_config["max_source_length"],
+                truncation=True,
+                padding=True,
+                return_tensors="pt",
+            )
+            encoded = {key: value.to(self.device) for key, value in encoded.items()}
+            generated = self.mt_model.generate(
+                **encoded,
+                max_length=self.mt_config["max_target_length"],
+                num_beams=self.mt_config["num_beams"],
+                forced_bos_token_id=self.mt_forced_bos_token_id,
+            )
+            translations.extend(self.mt_tokenizer.batch_decode(generated, skip_special_tokens=True))
+        return [translation.strip() for translation in translations]
+
+    def process_image(self, input_path, output=None, metadata=None):
+        input_path = resolve_path_from_cwd(input_path)
+        output_path = resolve_path_from_cwd(output) if output else self.default_output_path(input_path)
+        metadata_path = (
+            resolve_path_from_cwd(metadata)
+            if metadata
+            else output_path.with_suffix(output_path.suffix + self.real_config.get("metadata_suffix", ".json"))
+        )
+
+        with Image.open(input_path) as opened:
+            image = opened.convert("RGB")
+
+        regions = self.detect_text_regions(input_path)
+        ocr_texts = self.recognize_regions(image, regions)
+        translations = self.translate_texts(ocr_texts)
+        clean_image, mask = inpaint_image(image, regions, self.real_config)
+        rendered = render_regions(clean_image, regions, translations, self.config["render"])
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        rendered.save(output_path)
+
+        mask_path = output_path.with_suffix(".mask.png")
+        Image.fromarray(mask).save(mask_path)
+
+        for region, ocr_text, translation in zip(regions, ocr_texts, translations):
+            region["ocr_text"] = ocr_text
+            region["translation"] = translation
+
+        result = {
             "input": str(input_path),
             "output": str(output_path),
             "mask": str(mask_path),
+            "metadata": str(metadata_path),
             "num_regions": len(regions),
             "regions": regions,
-        },
-    )
-    print(f"detected regions: {len(regions)}")
-    print(f"wrote image -> {output_path}")
-    print(f"wrote mask -> {mask_path}")
-    print(f"wrote metadata -> {metadata_path}")
+        }
+        write_metadata(metadata_path, result)
+        return result
+
+
+def process_image(config_path, input_path, output, metadata):
+    translator = RealImageTranslator(config_path)
+    result = translator.process_image(input_path, output, metadata)
+    print(f"detected regions: {result['num_regions']}")
+    print(f"wrote image -> {result['output']}")
+    print(f"wrote mask -> {result['mask']}")
+    print(f"wrote metadata -> {result['metadata']}")
 
 
 def main():

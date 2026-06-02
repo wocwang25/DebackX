@@ -65,7 +65,18 @@ def check_cuda():
 
 
 def check_dependencies():
-    for name in ["transformers", "PIL", "sentencepiece", "sacrebleu", "cv2", "easyocr", "tqdm"]:
+    for name in [
+        "transformers",
+        "PIL",
+        "sentencepiece",
+        "sacrebleu",
+        "cv2",
+        "easyocr",
+        "fastapi",
+        "uvicorn",
+        "multipart",
+        "tqdm",
+    ]:
         ok, version = check_module(name)
         status = "ok" if ok else "missing"
         print(f"[{status}] {name}: {version}")
@@ -136,6 +147,17 @@ def check_real_image(config, config_path):
     print(f"[info] real-image output dir: {output_dir}")
 
 
+def check_worker(config, config_path):
+    worker_config = config.get("worker", {})
+    if not worker_config:
+        return
+
+    output_dir = resolve(config_path, worker_config["output_dir"])
+    print(f"[info] worker endpoint: http://{worker_config.get('host', '0.0.0.0')}:{worker_config.get('port', 8000)}")
+    print(f"[info] worker output dir: {output_dir}")
+    print(f"[info] worker max upload MB: {worker_config.get('max_upload_mb', 20)}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Check whether the IIMT training workspace is ready.")
     parser.add_argument("--config", default="configs/config-pipeline.json")
@@ -151,6 +173,7 @@ def main():
     check_ocr_labels(config, config_path)
     check_render(config)
     check_real_image(config, config_path)
+    check_worker(config, config_path)
 
 
 if __name__ == "__main__":

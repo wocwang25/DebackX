@@ -10,3 +10,6 @@ tokenizers==0.15.2
 safetensors==0.4.2
 sacrebleu==2.4.2
 easyocr==1.7.1
+fastapi==0.110.2
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9

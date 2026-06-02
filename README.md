@@ -192,3 +192,71 @@ sh scripts/translate-image.sh --input path/to/english-image.jpg --output outputs
 For the graduation project, the trainable parts are OCR and machine translation. The full system still satisfies the IIMT goal because it recognizes text inside images, translates it, and reconstructs a translated image.
 
 For real-world images that do not have clean `background` files, `scripts/translate-image.sh` uses OCR boxes as masks and OpenCV inpainting as the baseline text-removal method. A stronger inpainting model such as LaMa can replace this later for better visual quality.
+
+## Backend Worker
+
+After training, start the FastAPI worker:
+
+```bash
+sh scripts/run-worker.sh
+```
+
+Default server:
+
+```text
+http://0.0.0.0:8000
+```
+
+The worker loads EasyOCR, TrOCR, and NLLB once at startup and keeps them in memory. If you want to start the API before checkpoints exist, set `worker.load_models_on_startup` to `false` in `configs/config-pipeline.json`; the first translation job will load the models lazily.
+
+Health check:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Create an async translation job:
+
+```bash
+curl -X POST http://localhost:8000/jobs \
+  -F "file=@path/to/english-image.jpg"
+```
+
+Check job status:
+
+```bash
+curl http://localhost:8000/jobs/<job_id>
+```
+
+Run a synchronous translation request for demos:
+
+```bash
+curl -X POST http://localhost:8000/translate \
+  -F "file=@path/to/english-image.jpg"
+```
+
+Successful job responses include:
+
+```text
+result.output_url    # translated image URL
+result.mask_url      # inpainting mask URL
+result.metadata_url  # JSON with boxes, OCR text, and translations
+```
+
+Worker outputs are stored under:
+
+```text
+outputs/worker/uploads
+outputs/worker/results
+outputs/worker/jobs
+```
+
+For Docker GPU deployment:
+
+```bash
+docker build -f Dockerfile.worker -t iimt-worker .
+docker run --gpus all --rm -p 8000:8000 \
+  -v "$(pwd)/models:/app/models" \
+  -v "$(pwd)/outputs:/app/outputs" \
+  iimt-worker
+```

@@ -76,6 +76,15 @@
         "metadata_suffix": ".json",
         "note": "Inference path for user-uploaded images: detect text boxes, OCR, translate, inpaint old text, then render Vietnamese."
     },
+    "worker": {
+        "host": "0.0.0.0",
+        "port": 8000,
+        "output_dir": "../outputs/worker",
+        "max_upload_mb": 20,
+        "load_models_on_startup": true,
+        "allowed_extensions": [".jpg", ".jpeg", ".png", ".webp"],
+        "note": "FastAPI worker for backend integration. Mount output_dir as /files and keep OCR/MT models loaded in memory."
+    },
     "render": {
         "font_path": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "min_font_size": 8,
