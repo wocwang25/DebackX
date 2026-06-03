@@ -28,7 +28,17 @@ def collate_text(batch):
 
 
 @torch.no_grad()
-def predict(config_path, checkpoint, split, output, input_path):
+def predict(
+    config_path,
+    checkpoint,
+    split,
+    output,
+    input_path,
+    num_beams=None,
+    length_penalty=None,
+    no_repeat_ngram_size=None,
+    repetition_penalty=None,
+):
     config, config_file = load_config(config_path)
     mt_config = config["translation"]
     if input_path:
@@ -49,6 +59,21 @@ def predict(config_path, checkpoint, split, output, input_path):
     forced_bos_token_id = tokenizer.convert_tokens_to_ids(mt_config["target_code"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device).eval()
+    generation_config = {
+        "max_length": mt_config["max_target_length"],
+        "num_beams": num_beams if num_beams is not None else mt_config["num_beams"],
+        "forced_bos_token_id": forced_bos_token_id,
+        "length_penalty": length_penalty if length_penalty is not None else mt_config.get("length_penalty", 1.0),
+        "repetition_penalty": (
+            repetition_penalty if repetition_penalty is not None else mt_config.get("repetition_penalty", 1.0)
+        ),
+        "early_stopping": mt_config.get("early_stopping", True),
+    }
+    configured_no_repeat = no_repeat_ngram_size
+    if configured_no_repeat is None:
+        configured_no_repeat = mt_config.get("no_repeat_ngram_size", 0)
+    if configured_no_repeat:
+        generation_config["no_repeat_ngram_size"] = configured_no_repeat
 
     dataset = TextDataset(source_path)
     dataloader = DataLoader(dataset, batch_size=mt_config["eval_batch_size"], shuffle=False, collate_fn=collate_text)
@@ -63,12 +88,7 @@ def predict(config_path, checkpoint, split, output, input_path):
                 return_tensors="pt",
             )
             encoded = {key: value.to(device) for key, value in encoded.items()}
-            generated = model.generate(
-                **encoded,
-                max_length=mt_config["max_target_length"],
-                num_beams=mt_config["num_beams"],
-                forced_bos_token_id=forced_bos_token_id,
-            )
+            generated = model.generate(**encoded, **generation_config)
             for prediction in tokenizer.batch_decode(generated, skip_special_tokens=True):
                 out_file.write(prediction + "\n")
     print(f"wrote translations -> {output_path}")
@@ -81,8 +101,22 @@ def main():
     parser.add_argument("--split", default="test")
     parser.add_argument("--output", default="outputs/mt/test.pred.vi.txt")
     parser.add_argument("--input", default=None, help="Optional English text file, one line per image.")
+    parser.add_argument("--num-beams", type=int, default=None)
+    parser.add_argument("--length-penalty", type=float, default=None)
+    parser.add_argument("--no-repeat-ngram-size", type=int, default=None)
+    parser.add_argument("--repetition-penalty", type=float, default=None)
     args = parser.parse_args()
-    predict(args.config, args.checkpoint, args.split, args.output, args.input)
+    predict(
+        args.config,
+        args.checkpoint,
+        args.split,
+        args.output,
+        args.input,
+        args.num_beams,
+        args.length_penalty,
+        args.no_repeat_ngram_size,
+        args.repetition_penalty,
+    )
 
 
 if __name__ == "__main__":

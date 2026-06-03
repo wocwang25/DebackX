@@ -176,6 +176,92 @@ models/mt-nllb-1p3b-en-vi/last
 models/mt-nllb-1p3b-en-vi/metrics.json
 ```
 
+### 3.1. Quality Upgrade Flow
+
+Use this flow when the 600M translation model works but still produces some wrong translations.
+
+Keep the 600M baseline:
+
+```text
+models/mt-nllb-en-vi/best
+outputs/mt/test.pred.vi.txt
+```
+
+Train the stronger NLLB 1.3B model:
+
+```bash
+CONFIG=configs/config-pipeline-strong.json sh scripts/train-translation.sh
+```
+
+Predict the test split with the 1.3B checkpoint:
+
+```bash
+CONFIG=configs/config-pipeline-strong.json \
+CHECKPOINT=models/mt-nllb-1p3b-en-vi/best \
+OUTPUT=outputs/mt/test.1p3b.pred.vi.txt \
+SPLIT=test \
+sh scripts/predict-translation.sh
+```
+
+Analyze the 600M baseline errors:
+
+```bash
+PREDICTIONS=outputs/mt/test.pred.vi.txt \
+OUTPUT=outputs/mt/test.600m.translation-errors.tsv \
+TOP=200 \
+sh scripts/analyze-translation-errors.sh
+```
+
+Analyze the 1.3B errors:
+
+```bash
+CONFIG=configs/config-pipeline-strong.json \
+PREDICTIONS=outputs/mt/test.1p3b.pred.vi.txt \
+OUTPUT=outputs/mt/test.1p3b.translation-errors.tsv \
+TOP=200 \
+sh scripts/analyze-translation-errors.sh
+```
+
+Compare the lowest-scoring rows in:
+
+```text
+outputs/mt/test.600m.translation-errors.tsv
+outputs/mt/test.1p3b.translation-errors.tsv
+```
+
+If 1.3B is better but still has bad sentences, try decode variants without retraining:
+
+```bash
+CONFIG=configs/config-pipeline-strong.json \
+CHECKPOINT=models/mt-nllb-1p3b-en-vi/best \
+TAG=1p3b \
+BEAMS="4 5 6" \
+LENGTH_PENALTIES="0.9 1.0 1.1" \
+SPLIT=test \
+sh scripts/predict-translation-variants.sh
+```
+
+This writes files such as:
+
+```text
+outputs/mt/test.1p3b.beam4.lp1p0.pred.vi.txt
+outputs/mt/test.1p3b.beam5.lp1p0.pred.vi.txt
+outputs/mt/test.1p3b.beam6.lp1p1.pred.vi.txt
+```
+
+Pick the best-looking file by inspecting its `.errors.tsv` file and several rendered images.
+
+Render the selected translation file:
+
+```bash
+sh scripts/render-translations.sh \
+  --config configs/config-pipeline-strong.json \
+  --split test \
+  --translations outputs/mt/test.1p3b.pred.vi.txt
+```
+
+If a decode variant is better, replace the `--translations` path with that variant file.
+
 ### 4. Test Translation And Render Benchmark
 
 Generate Vietnamese translations for the test split using ground-truth English subtitles:
