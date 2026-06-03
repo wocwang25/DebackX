@@ -60,6 +60,19 @@ Main config:
 configs/config-pipeline.json
 ```
 
+Strong pretrained preset:
+
+```text
+configs/config-pipeline-strong.json
+```
+
+The strong preset uses:
+
+```text
+Translation: facebook/nllb-200-1.3B
+OCR:         microsoft/trocr-large-printed
+```
+
 Important outputs:
 
 ```text
@@ -149,6 +162,20 @@ models/mt-nllb-en-vi/metrics.json
 
 Use `best` for inference unless visual inspection shows `last` is better.
 
+To retrain translation with the stronger NLLB 1.3B preset:
+
+```bash
+CONFIG=configs/config-pipeline-strong.json sh scripts/train-translation.sh
+```
+
+Strong translation outputs:
+
+```text
+models/mt-nllb-1p3b-en-vi/best
+models/mt-nllb-1p3b-en-vi/last
+models/mt-nllb-1p3b-en-vi/metrics.json
+```
+
 ### 4. Test Translation And Render Benchmark
 
 Generate Vietnamese translations for the test split using ground-truth English subtitles:
@@ -206,6 +233,20 @@ models/ocr-trocr-en/metrics.json
 ```
 
 Use `best` for inference unless visual inspection shows `last` is better.
+
+To retrain OCR with the stronger TrOCR large preset:
+
+```bash
+CONFIG=configs/config-pipeline-strong.json sh scripts/train-ocr.sh
+```
+
+Strong OCR outputs:
+
+```text
+models/ocr-trocr-large-en/best
+models/ocr-trocr-large-en/last
+models/ocr-trocr-large-en/metrics.json
+```
 
 ### 6. Run Full Dataset Pipeline
 
