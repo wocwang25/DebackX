@@ -17,11 +17,11 @@ The active dataset root is `IIMT30k_Vi/Arial`.
 
 `OCR`
 
-Fine-tune TrOCR on cropped English text regions from `IIMT30k_Vi/Arial/{train,val}/en`.
+Fine-tune `microsoft/trocr-large-printed` on cropped English text regions from `IIMT30k_Vi/Arial/{train,val}/en`.
 
 `Translation`
 
-Fine-tune NLLB for English to Vietnamese using:
+Fine-tune `facebook/nllb-200-1.3B` for English to Vietnamese using:
 
 ```text
 IIMT30k_Vi/Arial/train/en/subtitle.txt
@@ -32,7 +32,7 @@ IIMT30k_Vi/Arial/val/vi/subtitle.txt
 
 `Rendering`
 
-Rendering text back into the image is not trained. It is a deterministic post-processing step controlled by `configs/config-pipeline.json`.
+Rendering text back into the image is not trained. It is a deterministic post-processing step controlled by `configs/config-pipeline-strong.json`.
 
 ## Dataset
 
@@ -54,19 +54,13 @@ The active training scripts use `subtitle.txt` and `pos.txt`. Tokenized files ca
 
 ## Configuration
 
-Main config:
-
-```text
-configs/config-pipeline.json
-```
-
-Strong pretrained preset:
+Main application config:
 
 ```text
 configs/config-pipeline-strong.json
 ```
 
-The strong preset uses:
+The main config uses:
 
 ```text
 Translation: facebook/nllb-200-1.3B
@@ -88,12 +82,12 @@ Important outputs:
 outputs/ocr/en/{train,val,test}/images
 outputs/ocr/en/{train,val,test}/labels.tsv
 outputs/ocr/en/test.pred.en.txt
-models/ocr-trocr-en/best
-models/mt-nllb-en-vi/best
-outputs/mt/test.pred.vi.txt
-outputs/mt/test.from-ocr.pred.vi.txt
-outputs/rendered/test/vi/image
-outputs/real_images
+models/ocr-trocr-large-en/best
+models/mt-nllb-1p3b-en-vi/best
+outputs/mt/test.1p3b.pred.vi.txt
+outputs/mt/test.from-ocr.1p3b.pred.vi.txt
+outputs/rendered_strong/test/vi/image
+outputs/real_images_strong
 ```
 
 ## Complete Workflow
@@ -119,7 +113,7 @@ Check whether the machine and dataset are ready:
 sh scripts/check-training-env.sh
 ```
 
-The config is already set to use `bf16`, which is suitable for A100.
+The main config is already set to use `bf16`, which is suitable for A100.
 
 ### 2. Prepare OCR Data
 
@@ -158,26 +152,10 @@ IIMT30k_Vi/Arial/val/vi/subtitle.txt
 Run:
 
 ```bash
-sh scripts/train-translation.sh
-```
-
-Outputs:
-
-```text
-models/mt-nllb-en-vi/best
-models/mt-nllb-en-vi/last
-models/mt-nllb-en-vi/metrics.json
-```
-
-Use `best` for inference unless visual inspection shows `last` is better.
-
-To retrain translation with the stronger NLLB 1.3B preset:
-
-```bash
 CONFIG=configs/config-pipeline-strong.json sh scripts/train-translation.sh
 ```
 
-Strong translation outputs:
+Outputs:
 
 ```text
 models/mt-nllb-1p3b-en-vi/best
@@ -185,22 +163,9 @@ models/mt-nllb-1p3b-en-vi/last
 models/mt-nllb-1p3b-en-vi/metrics.json
 ```
 
-### 3.1. Quality Upgrade Flow
+Use `best` for inference unless visual inspection shows `last` is better.
 
-Use this flow when the 600M translation model works but still produces some wrong translations.
-
-Keep the 600M baseline:
-
-```text
-models/mt-nllb-en-vi/best
-outputs/mt/test.pred.vi.txt
-```
-
-Train the stronger NLLB 1.3B model:
-
-```bash
-CONFIG=configs/config-pipeline-strong.json sh scripts/train-translation.sh
-```
+### 3.1. Translation Quality Check
 
 Predict the test split with the 1.3B checkpoint:
 
@@ -210,15 +175,6 @@ CHECKPOINT=models/mt-nllb-1p3b-en-vi/best \
 OUTPUT=outputs/mt/test.1p3b.pred.vi.txt \
 SPLIT=test \
 sh scripts/predict-translation.sh
-```
-
-Analyze the 600M baseline errors:
-
-```bash
-PREDICTIONS=outputs/mt/test.pred.vi.txt \
-OUTPUT=outputs/mt/test.600m.translation-errors.tsv \
-TOP=200 \
-sh scripts/analyze-translation-errors.sh
 ```
 
 Analyze the 1.3B errors:
@@ -231,14 +187,7 @@ TOP=200 \
 sh scripts/analyze-translation-errors.sh
 ```
 
-Compare the lowest-scoring rows in:
-
-```text
-outputs/mt/test.600m.translation-errors.tsv
-outputs/mt/test.1p3b.translation-errors.tsv
-```
-
-If 1.3B is better but still has bad sentences, try decode variants without retraining:
+If there are still bad sentences, try decode variants without retraining:
 
 ```bash
 CONFIG=configs/config-pipeline-strong.json \
@@ -273,13 +222,13 @@ If a decode variant is better, replace the `--translations` path with that varia
 
 ### 3.2. Application-Quality Mode
 
-For the final application output, use the strong preset and adaptive renderer. The trainable local models remain the academic baseline, while the deployed/demo path uses stronger pretrained checkpoints and better rendering.
+For the final application output, use the main strong config and adaptive renderer.
 
 Recommended production/demo path:
 
 ```text
 MT:     models/mt-nllb-1p3b-en-vi/best
-OCR:    models/ocr-trocr-large-en/best if trained, otherwise fallback to models/ocr-trocr-en/best
+OCR:    models/ocr-trocr-large-en/best
 Render: configs/config-pipeline-strong.json adaptive render settings
 ```
 
@@ -308,32 +257,37 @@ CONFIG=configs/config-pipeline-strong.json \
 sh scripts/translate-image.sh --input path/to/english-image.jpg
 ```
 
-If OCR is already good, retraining OCR large is optional. Prioritize stronger translation and adaptive rendering first.
-
 ### 4. Test Translation And Render Benchmark
 
 Generate Vietnamese translations for the test split using ground-truth English subtitles:
 
 ```bash
-CHECKPOINT=models/mt-nllb-en-vi/best SPLIT=test sh scripts/predict-translation.sh
+CONFIG=configs/config-pipeline-strong.json \
+CHECKPOINT=models/mt-nllb-1p3b-en-vi/best \
+OUTPUT=outputs/mt/test.1p3b.pred.vi.txt \
+SPLIT=test \
+sh scripts/predict-translation.sh
 ```
 
 Output:
 
 ```text
-outputs/mt/test.pred.vi.txt
+outputs/mt/test.1p3b.pred.vi.txt
 ```
 
 Render those translations onto the clean benchmark backgrounds:
 
 ```bash
-sh scripts/render-translations.sh --split test --translations outputs/mt/test.pred.vi.txt
+sh scripts/render-translations.sh \
+  --config configs/config-pipeline-strong.json \
+  --split test \
+  --translations outputs/mt/test.1p3b.pred.vi.txt
 ```
 
 Output:
 
 ```text
-outputs/rendered/test/vi/image
+outputs/rendered_strong/test/vi/image
 ```
 
 This benchmark checks:
@@ -347,7 +301,7 @@ It intentionally skips OCR so translation and rendering quality can be inspected
 For an oracle render benchmark with ground-truth Vietnamese subtitles:
 
 ```bash
-sh scripts/render-translations.sh --split test
+sh scripts/render-translations.sh --config configs/config-pipeline-strong.json --split test
 ```
 
 ### 5. Train OCR
@@ -355,26 +309,10 @@ sh scripts/render-translations.sh --split test
 Train the English OCR model after OCR crops are prepared:
 
 ```bash
-sh scripts/train-ocr.sh
-```
-
-Outputs:
-
-```text
-models/ocr-trocr-en/best
-models/ocr-trocr-en/last
-models/ocr-trocr-en/metrics.json
-```
-
-Use `best` for inference unless visual inspection shows `last` is better.
-
-To retrain OCR with the stronger TrOCR large preset:
-
-```bash
 CONFIG=configs/config-pipeline-strong.json sh scripts/train-ocr.sh
 ```
 
-Strong OCR outputs:
+Outputs:
 
 ```text
 models/ocr-trocr-large-en/best
@@ -382,36 +320,46 @@ models/ocr-trocr-large-en/last
 models/ocr-trocr-large-en/metrics.json
 ```
 
+Use `best` for inference unless visual inspection shows `last` is better.
+
 ### 6. Run Full Dataset Pipeline
 
 Run OCR on the test crops:
 
 ```bash
-CHECKPOINT=models/ocr-trocr-en/best SPLIT=test sh scripts/predict-ocr.sh
+CONFIG=configs/config-pipeline-strong.json CHECKPOINT=models/ocr-trocr-large-en/best SPLIT=test sh scripts/predict-ocr.sh
 ```
 
 Translate the OCR text to Vietnamese:
 
 ```bash
-INPUT=outputs/ocr/en/test.pred.en.txt OUTPUT=outputs/mt/test.from-ocr.pred.vi.txt CHECKPOINT=models/mt-nllb-en-vi/best SPLIT=test sh scripts/predict-translation.sh
+CONFIG=configs/config-pipeline-strong.json \
+INPUT=outputs/ocr/en/test.pred.en.txt \
+OUTPUT=outputs/mt/test.from-ocr.1p3b.pred.vi.txt \
+CHECKPOINT=models/mt-nllb-1p3b-en-vi/best \
+SPLIT=test \
+sh scripts/predict-translation.sh
 ```
 
 Output:
 
 ```text
-outputs/mt/test.from-ocr.pred.vi.txt
+outputs/mt/test.from-ocr.1p3b.pred.vi.txt
 ```
 
 Render the generated Vietnamese text onto clean test backgrounds:
 
 ```bash
-sh scripts/render-translations.sh --split test --translations outputs/mt/test.from-ocr.pred.vi.txt
+sh scripts/render-translations.sh \
+  --config configs/config-pipeline-strong.json \
+  --split test \
+  --translations outputs/mt/test.from-ocr.1p3b.pred.vi.txt
 ```
 
 Output:
 
 ```text
-outputs/rendered/test/vi/image
+outputs/rendered_strong/test/vi/image
 ```
 
 This full dataset pipeline checks:
@@ -425,15 +373,16 @@ English image crop -> OCR -> MT -> render Vietnamese into clean background
 After both checkpoints exist, run the deployable worker path on a user image:
 
 ```bash
+CONFIG=configs/config-pipeline-strong.json \
 sh scripts/translate-image.sh --input path/to/english-image.jpg
 ```
 
 Default outputs:
 
 ```text
-outputs/real_images/english-image.vi.png       # final translated image
-outputs/real_images/english-image.vi.mask.png  # text-removal mask
-outputs/real_images/english-image.vi.png.json  # boxes, OCR text, translations
+outputs/real_images_strong/english-image.vi.png       # final translated image
+outputs/real_images_strong/english-image.vi.mask.png  # text-removal mask
+outputs/real_images_strong/english-image.vi.png.json  # boxes, OCR text, translations
 ```
 
 This path adds the two parts that the dataset benchmark does not need:
@@ -446,7 +395,8 @@ OpenCV inpainting -> removes the original English text before rendering Vietname
 You can choose the output path manually:
 
 ```bash
-sh scripts/translate-image.sh --input path/to/english-image.jpg --output outputs/real_images/result.png
+CONFIG=configs/config-pipeline-strong.json \
+sh scripts/translate-image.sh --input path/to/english-image.jpg --output outputs/real_images_strong/result.png
 ```
 
 ### 8. Start Backend Worker
@@ -454,7 +404,7 @@ sh scripts/translate-image.sh --input path/to/english-image.jpg --output outputs
 After training, start the FastAPI worker:
 
 ```bash
-sh scripts/run-worker.sh
+CONFIG=configs/config-pipeline-strong.json sh scripts/run-worker.sh
 ```
 
 Default server:
@@ -463,7 +413,7 @@ Default server:
 http://0.0.0.0:8000
 ```
 
-The worker loads EasyOCR, TrOCR, and NLLB once at startup and keeps them in memory. If you want to start the API before checkpoints exist, set `worker.load_models_on_startup` to `false` in `configs/config-pipeline.json`; the first translation job will load the models lazily.
+The worker loads EasyOCR, TrOCR large, and NLLB 1.3B once at startup and keeps them in memory. If you want to start the API before checkpoints exist, set `worker.load_models_on_startup` to `false` in `configs/config-pipeline-strong.json`; the first translation job will load the models lazily.
 
 Health check:
 
@@ -502,9 +452,9 @@ result.metadata_url  # JSON with boxes, OCR text, and translations
 Worker outputs are stored under:
 
 ```text
-outputs/worker/uploads
-outputs/worker/results
-outputs/worker/jobs
+outputs/worker_strong/uploads
+outputs/worker_strong/results
+outputs/worker_strong/jobs
 ```
 
 For Docker GPU deployment:
@@ -512,6 +462,7 @@ For Docker GPU deployment:
 ```bash
 docker build -f Dockerfile.worker -t iimt-worker .
 docker run --gpus all --rm -p 8000:8000 \
+  -e CONFIG=configs/config-pipeline-strong.json \
   -v "$(pwd)/models:/app/models" \
   -v "$(pwd)/outputs:/app/outputs" \
   iimt-worker
@@ -526,8 +477,8 @@ For real-world images that do not have clean `background` files, `scripts/transl
 Recommended demo order:
 
 ```text
-1. Show translation metrics and test.pred.vi.txt examples.
-2. Show rendered benchmark images from outputs/rendered/test/vi/image.
+1. Show translation metrics and outputs/mt/test.1p3b.pred.vi.txt examples.
+2. Show rendered benchmark images from outputs/rendered_strong/test/vi/image.
 3. Show full OCR -> MT -> render examples after OCR training.
 4. Show backend worker API if the web app integration is needed.
 ```

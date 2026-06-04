@@ -76,7 +76,6 @@
         "inpaint_backend": "opencv_telea",
         "inpaint_radius": 3,
         "ocr_checkpoint": "../models/ocr-trocr-large-en/best",
-        "fallback_ocr_checkpoint": "../models/ocr-trocr-en/best",
         "mt_checkpoint": "../models/mt-nllb-1p3b-en-vi/best",
         "output_dir": "../outputs/real_images_strong",
         "metadata_suffix": ".json",
