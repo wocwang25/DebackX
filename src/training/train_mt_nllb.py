@@ -5,10 +5,26 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, get_linear_schedule_with_warmup
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, GenerationConfig, get_linear_schedule_with_warmup
 
 sys.path.append(str(Path(__file__).resolve().parent))
 from common import chrf_score, precision_dtype, resolve_from_config, save_json, set_seed, total_steps, use_amp, load_config
+
+
+def configure_generation(model, tokenizer, mt_config):
+    model.generation_config.max_length = mt_config["max_target_length"]
+    model.generation_config.num_beams = mt_config["num_beams"]
+    model.generation_config.forced_bos_token_id = tokenizer.convert_tokens_to_ids(mt_config["target_code"])
+    model.generation_config.length_penalty = mt_config.get("length_penalty", 1.0)
+    model.generation_config.repetition_penalty = mt_config.get("repetition_penalty", 1.0)
+    model.generation_config.early_stopping = mt_config.get("early_stopping", True)
+    no_repeat = mt_config.get("no_repeat_ngram_size", 0)
+    if no_repeat:
+        model.generation_config.no_repeat_ngram_size = no_repeat
+
+    default_generation_config = GenerationConfig()
+    for key in list(model.config._get_non_default_generation_parameters()):
+        setattr(model.config, key, getattr(default_generation_config, key, None))
 
 
 class ParallelTextDataset(Dataset):
@@ -98,7 +114,7 @@ def train(config_path, seed):
     model = AutoModelForSeq2SeqLM.from_pretrained(mt_config["pretrained_model"])
     tokenizer.src_lang = mt_config["source_code"]
     tokenizer.tgt_lang = mt_config["target_code"]
-    model.config.forced_bos_token_id = tokenizer.convert_tokens_to_ids(mt_config["target_code"])
+    configure_generation(model, tokenizer, mt_config)
 
     train_dataset = ParallelTextDataset(
         resolve_from_config(config_file, mt_config["train_source"]),
