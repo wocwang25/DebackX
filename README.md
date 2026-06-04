@@ -73,6 +73,15 @@ Translation: facebook/nllb-200-1.3B
 OCR:         microsoft/trocr-large-printed
 ```
 
+It also enables application-quality rendering:
+
+```text
+lower text-box opacity
+text stroke/outline
+adaptive text color from the original English image
+polygon-based inpainting mask for real images
+```
+
 Important outputs:
 
 ```text
@@ -261,6 +270,45 @@ sh scripts/render-translations.sh \
 ```
 
 If a decode variant is better, replace the `--translations` path with that variant file.
+
+### 3.2. Application-Quality Mode
+
+For the final application output, use the strong preset and adaptive renderer. The trainable local models remain the academic baseline, while the deployed/demo path uses stronger pretrained checkpoints and better rendering.
+
+Recommended production/demo path:
+
+```text
+MT:     models/mt-nllb-1p3b-en-vi/best
+OCR:    models/ocr-trocr-large-en/best if trained, otherwise fallback to models/ocr-trocr-en/best
+Render: configs/config-pipeline-strong.json adaptive render settings
+```
+
+The renderer now improves visual quality with:
+
+```text
+box_alpha = 0.25 for less intrusive background
+stroke_width = 1 for readable text without a heavy black box
+adaptive_text_color = true to reuse the original text color when possible
+mask_from_polygon = true to reduce damage to real-image backgrounds
+```
+
+Render the best translation output with the strong renderer:
+
+```bash
+sh scripts/render-translations.sh \
+  --config configs/config-pipeline-strong.json \
+  --split test \
+  --translations outputs/mt/test.1p3b.pred.vi.txt
+```
+
+Run real-image CLI with the strong config:
+
+```bash
+CONFIG=configs/config-pipeline-strong.json \
+sh scripts/translate-image.sh --input path/to/english-image.jpg
+```
+
+If OCR is already good, retraining OCR large is optional. Prioritize stronger translation and adaptive rendering first.
 
 ### 4. Test Translation And Render Benchmark
 

@@ -23,8 +23,25 @@ def configure_generation(model, tokenizer, mt_config):
         model.generation_config.no_repeat_ngram_size = no_repeat
 
     default_generation_config = GenerationConfig()
-    for key in list(model.config._get_non_default_generation_parameters()):
-        setattr(model.config, key, getattr(default_generation_config, key, None))
+    if hasattr(model.config, "_get_non_default_generation_parameters"):
+        generation_keys = list(model.config._get_non_default_generation_parameters())
+    else:
+        generation_keys = [
+            "max_length",
+            "min_length",
+            "num_beams",
+            "num_beam_groups",
+            "do_sample",
+            "early_stopping",
+            "forced_bos_token_id",
+            "forced_eos_token_id",
+            "length_penalty",
+            "no_repeat_ngram_size",
+            "repetition_penalty",
+        ]
+    for key in generation_keys:
+        if hasattr(model.config, key):
+            setattr(model.config, key, getattr(default_generation_config, key, None))
 
 
 class ParallelTextDataset(Dataset):

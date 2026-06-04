@@ -89,8 +89,14 @@ def make_mask(image_size, regions, real_config):
     mask = np.zeros((height, width), dtype=np.uint8)
     padding = int(real_config.get("box_padding", 0))
     for region in regions:
-        x1, y1, x2, y2 = clamp_box(region["box"], width, height, padding)
-        cv2.rectangle(mask, (x1, y1), (x2, y2), 255, thickness=-1)
+        if real_config.get("mask_from_polygon", True) and region.get("polygon"):
+            points = np.array(region["polygon"], dtype=np.float32)
+            points[:, 0] = np.clip(points[:, 0], 0, width - 1)
+            points[:, 1] = np.clip(points[:, 1], 0, height - 1)
+            cv2.fillPoly(mask, [np.round(points).astype(np.int32)], 255)
+        else:
+            x1, y1, x2, y2 = clamp_box(region["box"], width, height, padding)
+            cv2.rectangle(mask, (x1, y1), (x2, y2), 255, thickness=-1)
 
     dilation = int(real_config.get("mask_dilation", 0))
     if dilation > 0:
@@ -112,11 +118,11 @@ def inpaint_image(image, regions, real_config):
     return Image.fromarray(inpainted), mask
 
 
-def render_regions(image, regions, translations, render_config):
+def render_regions(image, regions, translations, render_config, style_source=None):
     rendered = image.copy()
     for region, translation in zip(regions, translations):
         box = clamp_box(region["box"], rendered.width, rendered.height, padding=0)
-        rendered = draw_translated_text(rendered, box, translation, render_config)
+        rendered = draw_translated_text(rendered, box, translation, render_config, style_source)
     return rendered
 
 
@@ -150,7 +156,14 @@ class RealImageTranslator:
 
     @property
     def ocr_checkpoint(self):
-        return resolve_from_config(self.config_file, self.real_config["ocr_checkpoint"])
+        checkpoint = resolve_from_config(self.config_file, self.real_config["ocr_checkpoint"])
+        fallback = self.real_config.get("fallback_ocr_checkpoint")
+        if checkpoint.exists() or not fallback:
+            return checkpoint
+        fallback_checkpoint = resolve_from_config(self.config_file, fallback)
+        if fallback_checkpoint.exists():
+            return fallback_checkpoint
+        return checkpoint
 
     @property
     def mt_checkpoint(self):
@@ -325,7 +338,7 @@ class RealImageTranslator:
         ocr_texts = self.recognize_regions(image, regions)
         translations = self.translate_texts(ocr_texts)
         clean_image, mask = inpaint_image(image, regions, self.real_config)
-        rendered = render_regions(clean_image, regions, translations, self.config["render"])
+        rendered = render_regions(clean_image, regions, translations, self.config["render"], style_source=image)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         rendered.save(output_path)
