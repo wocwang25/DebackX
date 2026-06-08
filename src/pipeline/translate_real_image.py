@@ -6,7 +6,7 @@ import cv2
 import easyocr
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageEnhance
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, TrOCRProcessor, VisionEncoderDecoderModel
@@ -47,18 +47,85 @@ def normalize_polygon(raw_polygon):
     return [[float(point[0]), float(point[1])] for point in raw_polygon]
 
 
+def resample_bicubic():
+    return getattr(getattr(Image, "Resampling", Image), "BICUBIC")
+
+
+def polygon_crop(image, polygon, padding):
+    points = np.array(polygon, dtype=np.float32)
+    if points.shape != (4, 2):
+        return None
+
+    top_width = np.linalg.norm(points[1] - points[0])
+    bottom_width = np.linalg.norm(points[2] - points[3])
+    left_height = np.linalg.norm(points[3] - points[0])
+    right_height = np.linalg.norm(points[2] - points[1])
+    width = max(1, int(round(max(top_width, bottom_width))) + padding * 2)
+    height = max(1, int(round(max(left_height, right_height))) + padding * 2)
+
+    target = np.array(
+        [
+            [padding, padding],
+            [width - padding - 1, padding],
+            [width - padding - 1, height - padding - 1],
+            [padding, height - padding - 1],
+        ],
+        dtype=np.float32,
+    )
+    matrix = cv2.getPerspectiveTransform(points, target)
+    crop = cv2.warpPerspective(
+        np.array(image.convert("RGB")),
+        matrix,
+        (width, height),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_REPLICATE,
+    )
+    return Image.fromarray(crop)
+
+
+def preprocess_ocr_crop(crop, real_config):
+    crop = crop.convert("RGB")
+    min_height = int(real_config.get("ocr_crop_min_height", 0))
+    max_scale = float(real_config.get("ocr_crop_max_scale", 1.0))
+    if min_height > 0 and crop.height > 0 and crop.height < min_height:
+        scale = min(min_height / crop.height, max_scale)
+        if scale > 1.0:
+            new_size = (
+                max(1, int(round(crop.width * scale))),
+                max(1, int(round(crop.height * scale))),
+            )
+            crop = crop.resize(new_size, resample=resample_bicubic())
+
+    contrast = float(real_config.get("ocr_crop_contrast", 1.0))
+    if contrast != 1.0:
+        crop = ImageEnhance.Contrast(crop).enhance(contrast)
+
+    sharpness = float(real_config.get("ocr_crop_sharpness", 1.0))
+    if sharpness != 1.0:
+        crop = ImageEnhance.Sharpness(crop).enhance(sharpness)
+
+    return crop
+
+
 class CropDataset(Dataset):
-    def __init__(self, image, regions, padding):
+    def __init__(self, image, regions, real_config):
         self.image = image
         self.regions = regions
-        self.padding = padding
+        self.real_config = real_config
+        self.padding = int(real_config.get("box_padding", 0))
 
     def __len__(self):
         return len(self.regions)
 
     def __getitem__(self, index):
-        box = clamp_box(self.regions[index]["box"], self.image.width, self.image.height, self.padding)
-        return self.image.crop(box), index
+        region = self.regions[index]
+        crop = None
+        if self.real_config.get("ocr_use_polygon_crop", True) and region.get("polygon"):
+            crop = polygon_crop(self.image, region["polygon"], self.padding)
+        if crop is None:
+            box = clamp_box(region["box"], self.image.width, self.image.height, self.padding)
+            crop = self.image.crop(box)
+        return preprocess_ocr_crop(crop, self.real_config), index
 
 
 class OcrCollator:
@@ -176,6 +243,7 @@ class RealImageTranslator:
         return {
             "device": str(self.device),
             "cuda_available": torch.cuda.is_available(),
+            "recognizer": self.real_config.get("recognizer", "trocr"),
             "ocr_checkpoint": str(self.ocr_checkpoint),
             "ocr_checkpoint_exists": self.ocr_checkpoint.exists(),
             "mt_checkpoint": str(self.mt_checkpoint),
@@ -243,6 +311,8 @@ class RealImageTranslator:
             low_text=float(self.real_config.get("detector_low_text", 0.3)),
             link_threshold=float(self.real_config.get("detector_link_threshold", 0.4)),
             width_ths=float(self.real_config.get("detector_width_ths", 0.7)),
+            canvas_size=int(self.real_config.get("detector_canvas_size", 2560)),
+            mag_ratio=float(self.real_config.get("detector_mag_ratio", 1.0)),
         )
 
         min_confidence = float(self.real_config.get("min_confidence", 0.0))
@@ -269,9 +339,15 @@ class RealImageTranslator:
     def recognize_regions(self, image, regions):
         if not regions:
             return []
+
+        recognizer = self.real_config.get("recognizer", "trocr")
+        detector_texts = [region.get("detector_text", "").strip() for region in regions]
+        if recognizer in {"easyocr", "detector"}:
+            return detector_texts
+
         self.load_ocr()
 
-        dataset = CropDataset(image, regions, int(self.real_config.get("box_padding", 0)))
+        dataset = CropDataset(image, regions, self.real_config)
         dataloader = DataLoader(
             dataset,
             batch_size=self.ocr_config["eval_batch_size"],
@@ -294,6 +370,18 @@ class RealImageTranslator:
             decoded = self.ocr_processor.batch_decode(generated, skip_special_tokens=True)
             for index, text in zip(batch["indexes"], decoded):
                 predictions[index] = text.strip()
+
+        if recognizer == "hybrid":
+            confidence_threshold = float(self.real_config.get("detector_text_min_confidence", 0.65))
+            merged_predictions = []
+            for region, detector_text, trocr_text in zip(regions, detector_texts, predictions):
+                detector_confidence = float(region.get("detector_confidence", 0.0))
+                if detector_text and detector_confidence >= confidence_threshold:
+                    merged_predictions.append(detector_text)
+                else:
+                    merged_predictions.append(trocr_text)
+            return merged_predictions
+
         return predictions
 
     @torch.no_grad()

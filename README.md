@@ -17,7 +17,9 @@ The active dataset root is `IIMT30k_Vi/Arial`.
 
 `OCR`
 
-Fine-tune `microsoft/trocr-large-printed` on cropped English text regions from `IIMT30k_Vi/Arial/{train,val}/en`.
+Fine-tune `microsoft/trocr-base-printed` on cropped English text regions from `IIMT30k_Vi/Arial/{train,val}/en`.
+
+TrOCR large was tested but overfit heavily on this dataset, so the production OCR path uses the base checkpoint that generalizes better.
 
 `Translation`
 
@@ -64,12 +66,13 @@ The main config uses:
 
 ```text
 Translation: facebook/nllb-200-1.3B
-OCR:         microsoft/trocr-large-printed
+OCR:         microsoft/trocr-base-printed + hybrid real-image OCR
 ```
 
 It also enables application-quality rendering:
 
 ```text
+hybrid OCR for large real images
 lower text-box opacity
 text stroke/outline
 adaptive text color from the original English image
@@ -82,7 +85,7 @@ Important outputs:
 outputs/ocr/en/{train,val,test}/images
 outputs/ocr/en/{train,val,test}/labels.tsv
 outputs/ocr/en/test.pred.en.txt
-models/ocr-trocr-large-en/best
+models/ocr-trocr-en/best
 models/mt-nllb-1p3b-en-vi/best
 outputs/mt/test.1p3b.pred.vi.txt
 outputs/mt/test.from-ocr.1p3b.pred.vi.txt
@@ -228,9 +231,19 @@ Recommended production/demo path:
 
 ```text
 MT:     models/mt-nllb-1p3b-en-vi/best
-OCR:    models/ocr-trocr-large-en/best
+OCR:    models/ocr-trocr-en/best
 Render: configs/config-pipeline-strong.json adaptive render settings
 ```
+
+For uploaded images, OCR uses hybrid recognition:
+
+```text
+EasyOCR detects text boxes and reads text
+if EasyOCR confidence >= 0.65, use EasyOCR text
+otherwise crop the polygon, upscale/enhance it, then read with TrOCR base
+```
+
+This is more robust for large images because the uploaded-image domain is less clean than the IIMT crop dataset.
 
 The renderer now improves visual quality with:
 
@@ -315,9 +328,9 @@ CONFIG=configs/config-pipeline-strong.json sh scripts/train-ocr.sh
 Outputs:
 
 ```text
-models/ocr-trocr-large-en/best
-models/ocr-trocr-large-en/last
-models/ocr-trocr-large-en/metrics.json
+models/ocr-trocr-en/best
+models/ocr-trocr-en/last
+models/ocr-trocr-en/metrics.json
 ```
 
 Use `best` for inference unless visual inspection shows `last` is better.
@@ -327,7 +340,7 @@ Use `best` for inference unless visual inspection shows `last` is better.
 Run OCR on the test crops:
 
 ```bash
-CONFIG=configs/config-pipeline-strong.json CHECKPOINT=models/ocr-trocr-large-en/best SPLIT=test sh scripts/predict-ocr.sh
+CONFIG=configs/config-pipeline-strong.json CHECKPOINT=models/ocr-trocr-en/best SPLIT=test sh scripts/predict-ocr.sh
 ```
 
 Translate the OCR text to Vietnamese:
@@ -413,7 +426,7 @@ Default server:
 http://0.0.0.0:8000
 ```
 
-The worker loads EasyOCR, TrOCR large, and NLLB 1.3B once at startup and keeps them in memory. If you want to start the API before checkpoints exist, set `worker.load_models_on_startup` to `false` in `configs/config-pipeline-strong.json`; the first translation job will load the models lazily.
+The worker loads EasyOCR, TrOCR base, and NLLB 1.3B once at startup and keeps them in memory. In real-image mode, EasyOCR is also used as a high-confidence OCR fallback before TrOCR. If you want to start the API before checkpoints exist, set `worker.load_models_on_startup` to `false` in `configs/config-pipeline-strong.json`; the first translation job will load the models lazily.
 
 Health check:
 

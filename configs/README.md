@@ -3,7 +3,7 @@
 The active configuration is:
 
 ```text
-configs/config-pipeline.json
+configs/config-pipeline-strong.json
 ```
 
 ## Sections
@@ -26,7 +26,9 @@ For benchmark/evaluation on `IIMT30k_Vi`, clean backgrounds are available in the
 
 `real_image`
 
-Controls the deployable worker path for user-uploaded images. It uses EasyOCR for text detection, the fine-tuned TrOCR checkpoint for recognition, the fine-tuned NLLB checkpoint for translation, OpenCV inpainting to remove old text, and the render config to insert Vietnamese text.
+Controls the deployable worker path for user-uploaded images. It uses EasyOCR for text detection, hybrid OCR recognition, the fine-tuned NLLB checkpoint for translation, OpenCV inpainting to remove old text, and the render config to insert Vietnamese text.
+
+The hybrid OCR mode uses confident EasyOCR text directly. If EasyOCR confidence is lower than `detector_text_min_confidence`, it crops the detected polygon, upscales/enhances the crop, and reads it with the fine-tuned TrOCR base checkpoint.
 
 `worker`
 
