@@ -26,9 +26,9 @@ For benchmark/evaluation on `IIMT30k_Vi`, clean backgrounds are available in the
 
 `real_image`
 
-Controls the deployable worker path for user-uploaded images. It uses EasyOCR for text detection, hybrid OCR recognition, the fine-tuned NLLB checkpoint for translation, OpenCV inpainting to remove old text, and the render config to insert Vietnamese text.
+Controls the deployable worker path for user-uploaded images. The strong config uses PaddleOCR PP-OCRv5 for scene-text detection and recognition, the fine-tuned NLLB checkpoint for translation, OpenCV inpainting to remove old text, and the render config to insert Vietnamese text.
 
-The hybrid OCR mode uses confident EasyOCR text directly. If EasyOCR confidence is lower than `detector_text_min_confidence`, it crops the detected polygon, upscales/enhances the crop, and reads it with the fine-tuned TrOCR base checkpoint.
+For subtitle-like images, `merge_text_regions` groups nearby OCR lines into one text block before translation so the MT model receives a complete sentence instead of isolated words or short fragments.
 
 `worker`
 

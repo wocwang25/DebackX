@@ -1,0 +1,4 @@
+# Optional stronger OCR backend for real-image/worker inference.
+# Install this after requirements.txt. For GPU, install a PaddlePaddle wheel
+# that matches the server CUDA version before installing paddleocr.
+paddleocr[all]>=3.0.0,<4.0.0

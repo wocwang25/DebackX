@@ -47,6 +47,125 @@ def normalize_polygon(raw_polygon):
     return [[float(point[0]), float(point[1])] for point in raw_polygon]
 
 
+def box_to_polygon(box):
+    x1, y1, x2, y2 = [float(value) for value in box]
+    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
+
+def union_box(boxes):
+    points = np.array(boxes, dtype=np.float32)
+    x1 = float(points[:, 0].min())
+    y1 = float(points[:, 1].min())
+    x2 = float(points[:, 2].max())
+    y2 = float(points[:, 3].max())
+    return x1, y1, x2, y2
+
+
+def region_height(region):
+    x1, y1, x2, y2 = region["box"]
+    return max(1.0, float(y2) - float(y1))
+
+
+def region_text(region):
+    return region.get("detector_text", "").strip()
+
+
+def as_python_list(value):
+    if value is None:
+        return []
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    return value
+
+
+def result_to_dict(result):
+    if isinstance(result, dict):
+        payload = result
+    elif hasattr(result, "json"):
+        raw_json = result.json
+        payload = raw_json() if callable(raw_json) else raw_json
+    elif hasattr(result, "res"):
+        payload = result.res
+    else:
+        payload = vars(result)
+
+    if isinstance(payload, dict) and "res" in payload:
+        return payload["res"]
+    return payload
+
+
+def parse_paddleocr_result(result, min_confidence):
+    payload = result_to_dict(result)
+    if not isinstance(payload, dict):
+        return []
+
+    texts = as_python_list(payload.get("rec_texts"))
+    scores = as_python_list(payload.get("rec_scores"))
+    polygons = payload.get("rec_polys")
+    if polygons is None:
+        polygons = payload.get("dt_polys")
+    polygons = as_python_list(polygons)
+    boxes = as_python_list(payload.get("rec_boxes"))
+
+    regions = []
+    for index, text in enumerate(texts):
+        text = str(text).strip()
+        if not text:
+            continue
+
+        confidence = float(scores[index]) if index < len(scores) else 1.0
+        if confidence < min_confidence:
+            continue
+
+        polygon = None
+        if index < len(polygons):
+            polygon = normalize_polygon(polygons[index])
+        elif index < len(boxes):
+            polygon = box_to_polygon(boxes[index])
+
+        if not polygon:
+            continue
+
+        regions.append(
+            {
+                "index": index,
+                "polygon": polygon,
+                "box": polygon_to_box(polygon),
+                "detector_text": text,
+                "detector_confidence": confidence,
+                "detector_backend": "paddleocr",
+            }
+        )
+    return regions
+
+
+def parse_legacy_paddleocr_result(result, min_confidence):
+    if not result:
+        return []
+    page = result[0] if len(result) == 1 and isinstance(result[0], list) else result
+    regions = []
+    for index, item in enumerate(page or []):
+        if not item or len(item) < 2:
+            continue
+        polygon = normalize_polygon(item[0])
+        text, confidence = item[1]
+        text = str(text).strip()
+        confidence = float(confidence)
+        if not text or confidence < min_confidence:
+            continue
+        regions.append(
+            {
+                "index": index,
+                "polygon": polygon,
+                "box": polygon_to_box(polygon),
+                "detector_text": text,
+                "detector_confidence": confidence,
+                "detector_backend": "paddleocr_legacy",
+            }
+        )
+    return regions
+
+
 def resample_bicubic():
     return getattr(getattr(Image, "Resampling", Image), "BICUBIC")
 
@@ -105,6 +224,54 @@ def preprocess_ocr_crop(crop, real_config):
         crop = ImageEnhance.Sharpness(crop).enhance(sharpness)
 
     return crop
+
+
+def merge_text_regions(regions, real_config):
+    if not real_config.get("merge_text_regions", False) or len(regions) < 2:
+        return regions
+
+    max_gap_ratio = float(real_config.get("merge_line_gap_ratio", 1.6))
+    max_gap_px = float(real_config.get("merge_line_gap_px", 18))
+    regions = sorted(regions, key=lambda region: (region["box"][1], region["box"][0]))
+    groups = []
+    current_group = [regions[0]]
+
+    for region in regions[1:]:
+        previous = current_group[-1]
+        previous_height = region_height(previous)
+        y_gap = float(region["box"][1]) - float(previous["box"][3])
+        max_allowed_gap = max(max_gap_px, previous_height * max_gap_ratio)
+        if y_gap <= max_allowed_gap:
+            current_group.append(region)
+        else:
+            groups.append(current_group)
+            current_group = [region]
+    groups.append(current_group)
+
+    merged_regions = []
+    for group_index, group in enumerate(groups):
+        if len(group) == 1:
+            single = dict(group[0])
+            single["index"] = group_index
+            merged_regions.append(single)
+            continue
+
+        group = sorted(group, key=lambda region: (region["box"][1], region["box"][0]))
+        box = union_box([region["box"] for region in group])
+        text = " ".join(region_text(region) for region in group if region_text(region))
+        confidence = min(float(region.get("detector_confidence", 1.0)) for region in group)
+        merged_regions.append(
+            {
+                "index": group_index,
+                "polygon": box_to_polygon(box),
+                "box": box,
+                "detector_text": text,
+                "detector_confidence": confidence,
+                "detector_backend": group[0].get("detector_backend", "unknown"),
+                "merged_from": group,
+            }
+        )
+    return merged_regions
 
 
 class CropDataset(Dataset):
@@ -218,6 +385,18 @@ class RealImageTranslator:
             self.load()
 
     @property
+    def detector_backend(self):
+        return self.real_config.get("detector", "easyocr")
+
+    @property
+    def recognizer_backend(self):
+        return self.real_config.get("recognizer", "trocr")
+
+    @property
+    def uses_trocr_recognizer(self):
+        return self.recognizer_backend in {"trocr", "hybrid"}
+
+    @property
     def output_dir(self):
         return output_path(self.config_file, self.real_config["output_dir"])
 
@@ -243,7 +422,8 @@ class RealImageTranslator:
         return {
             "device": str(self.device),
             "cuda_available": torch.cuda.is_available(),
-            "recognizer": self.real_config.get("recognizer", "trocr"),
+            "detector": self.detector_backend,
+            "recognizer": self.recognizer_backend,
             "ocr_checkpoint": str(self.ocr_checkpoint),
             "ocr_checkpoint_exists": self.ocr_checkpoint.exists(),
             "mt_checkpoint": str(self.mt_checkpoint),
@@ -254,29 +434,65 @@ class RealImageTranslator:
 
     @property
     def models_loaded(self):
-        return all(
-            item is not None
-            for item in [
-                self.detector,
-                self.ocr_processor,
-                self.ocr_model,
-                self.mt_tokenizer,
-                self.mt_model,
-            ]
-        )
+        required = [self.detector, self.mt_tokenizer, self.mt_model]
+        if self.uses_trocr_recognizer:
+            required.extend([self.ocr_processor, self.ocr_model])
+        return all(item is not None for item in required)
 
     def load(self):
         self.load_detector()
-        self.load_ocr()
+        if self.uses_trocr_recognizer:
+            self.load_ocr()
         self.load_mt()
 
     def load_detector(self):
         if self.detector is not None:
             return
-        self.detector = easyocr.Reader(
-            self.real_config.get("detector_languages", ["en"]),
-            gpu=bool(self.real_config.get("detector_gpu", True)) and torch.cuda.is_available(),
-        )
+
+        if self.detector_backend == "easyocr":
+            self.detector = easyocr.Reader(
+                self.real_config.get("detector_languages", ["en"]),
+                gpu=bool(self.real_config.get("detector_gpu", True)) and torch.cuda.is_available(),
+            )
+            return
+
+        if self.detector_backend == "paddleocr":
+            try:
+                from paddleocr import PaddleOCR
+            except ImportError as exc:
+                raise ImportError(
+                    "PaddleOCR backend is enabled but PaddleOCR is not installed. "
+                    "Install the optional PaddleOCR dependencies documented in README.md."
+                ) from exc
+
+            device = self.real_config.get("paddleocr_device")
+            if not device:
+                device = "gpu:0" if torch.cuda.is_available() and self.real_config.get("detector_gpu", True) else "cpu"
+
+            self.detector = PaddleOCR(
+                use_doc_orientation_classify=bool(self.real_config.get("paddleocr_use_doc_orientation", False)),
+                use_doc_unwarping=bool(self.real_config.get("paddleocr_use_doc_unwarping", False)),
+                use_textline_orientation=bool(self.real_config.get("paddleocr_use_textline_orientation", False)),
+                lang=self.real_config.get("paddleocr_lang", "en"),
+                ocr_version=self.real_config.get("paddleocr_version", "PP-OCRv5"),
+                text_detection_model_name=self.real_config.get(
+                    "paddleocr_text_detection_model_name", "PP-OCRv5_server_det"
+                ),
+                text_recognition_model_name=self.real_config.get(
+                    "paddleocr_text_recognition_model_name", "en_PP-OCRv5_mobile_rec"
+                ),
+                text_recognition_batch_size=int(self.real_config.get("paddleocr_text_recognition_batch_size", 8)),
+                text_det_limit_side_len=int(self.real_config.get("paddleocr_text_det_limit_side_len", 4096)),
+                text_det_limit_type=self.real_config.get("paddleocr_text_det_limit_type", "max"),
+                text_det_thresh=float(self.real_config.get("paddleocr_text_det_thresh", 0.25)),
+                text_det_box_thresh=float(self.real_config.get("paddleocr_text_det_box_thresh", 0.5)),
+                text_det_unclip_ratio=float(self.real_config.get("paddleocr_text_det_unclip_ratio", 1.8)),
+                text_rec_score_thresh=float(self.real_config.get("paddleocr_text_rec_score_thresh", 0.35)),
+                device=device,
+            )
+            return
+
+        raise ValueError(f"Unsupported detector backend: {self.detector_backend}")
 
     def load_ocr(self):
         if self.ocr_model is not None and self.ocr_processor is not None:
@@ -303,6 +519,32 @@ class RealImageTranslator:
 
     def detect_text_regions(self, image_path):
         self.load_detector()
+
+        if self.detector_backend == "paddleocr":
+            min_confidence = float(self.real_config.get("min_confidence", 0.0))
+            if hasattr(self.detector, "predict"):
+                results = self.detector.predict(
+                    str(image_path),
+                    use_doc_orientation_classify=bool(self.real_config.get("paddleocr_use_doc_orientation", False)),
+                    use_doc_unwarping=bool(self.real_config.get("paddleocr_use_doc_unwarping", False)),
+                    use_textline_orientation=bool(self.real_config.get("paddleocr_use_textline_orientation", False)),
+                    text_det_limit_side_len=int(self.real_config.get("paddleocr_text_det_limit_side_len", 4096)),
+                    text_det_limit_type=self.real_config.get("paddleocr_text_det_limit_type", "max"),
+                    text_det_thresh=float(self.real_config.get("paddleocr_text_det_thresh", 0.25)),
+                    text_det_box_thresh=float(self.real_config.get("paddleocr_text_det_box_thresh", 0.5)),
+                    text_det_unclip_ratio=float(self.real_config.get("paddleocr_text_det_unclip_ratio", 1.8)),
+                    text_rec_score_thresh=float(self.real_config.get("paddleocr_text_rec_score_thresh", 0.35)),
+                )
+                regions = []
+                for result in results:
+                    regions.extend(parse_paddleocr_result(result, min_confidence))
+            else:
+                raw_result = self.detector.ocr(str(image_path), cls=False)
+                regions = parse_legacy_paddleocr_result(raw_result, min_confidence)
+
+            regions.sort(key=lambda region: (region["box"][1], region["box"][0]))
+            return merge_text_regions(regions, self.real_config)
+
         detections = self.detector.readtext(
             str(image_path),
             detail=1,
@@ -333,16 +575,16 @@ class RealImageTranslator:
                 }
             )
         regions.sort(key=lambda region: (region["box"][1], region["box"][0]))
-        return regions
+        return merge_text_regions(regions, self.real_config)
 
     @torch.no_grad()
     def recognize_regions(self, image, regions):
         if not regions:
             return []
 
-        recognizer = self.real_config.get("recognizer", "trocr")
+        recognizer = self.recognizer_backend
         detector_texts = [region.get("detector_text", "").strip() for region in regions]
-        if recognizer in {"easyocr", "detector"}:
+        if recognizer in {"easyocr", "detector", "paddleocr"}:
             return detector_texts
 
         self.load_ocr()

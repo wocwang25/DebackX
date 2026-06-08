@@ -24,7 +24,7 @@
         "num_workers": 4,
         "precision": "bf16",
         "eval_samples": 1500,
-        "note": "Production OCR preset: use the fine-tuned TrOCR base checkpoint because it generalizes better than TrOCR large on this dataset."
+        "note": "Dataset OCR preset: use the fine-tuned TrOCR base checkpoint because it generalizes better than TrOCR large on this dataset."
     },
     "translation": {
         "backend": "nllb",
@@ -62,7 +62,7 @@
         "mask_from": "ocr_text_box"
     },
     "real_image": {
-        "detector": "easyocr",
+        "detector": "paddleocr",
         "detector_languages": ["en"],
         "detector_gpu": true,
         "detector_text_threshold": 0.5,
@@ -71,9 +71,26 @@
         "detector_width_ths": 0.7,
         "detector_canvas_size": 4096,
         "detector_mag_ratio": 1.5,
-        "min_confidence": 0.1,
+        "min_confidence": 0.35,
         "box_padding": 4,
-        "recognizer": "hybrid",
+        "recognizer": "paddleocr",
+        "paddleocr_lang": "en",
+        "paddleocr_version": "PP-OCRv5",
+        "paddleocr_text_detection_model_name": "PP-OCRv5_server_det",
+        "paddleocr_text_recognition_model_name": "en_PP-OCRv5_mobile_rec",
+        "paddleocr_text_recognition_batch_size": 8,
+        "paddleocr_text_det_limit_side_len": 4096,
+        "paddleocr_text_det_limit_type": "max",
+        "paddleocr_text_det_thresh": 0.25,
+        "paddleocr_text_det_box_thresh": 0.5,
+        "paddleocr_text_det_unclip_ratio": 1.8,
+        "paddleocr_text_rec_score_thresh": 0.35,
+        "paddleocr_use_doc_orientation": false,
+        "paddleocr_use_doc_unwarping": false,
+        "paddleocr_use_textline_orientation": false,
+        "merge_text_regions": true,
+        "merge_line_gap_ratio": 1.6,
+        "merge_line_gap_px": 18,
         "detector_text_min_confidence": 0.65,
         "ocr_use_polygon_crop": true,
         "ocr_crop_min_height": 64,
@@ -88,7 +105,7 @@
         "mt_checkpoint": "../models/mt-nllb-1p3b-en-vi/best",
         "output_dir": "../outputs/real_images_strong",
         "metadata_suffix": ".json",
-        "note": "Strong inference path for user-uploaded images. Hybrid OCR uses confident EasyOCR text and falls back to TrOCR base on preprocessed crops."
+        "note": "Strong inference path for user-uploaded images. Uses PaddleOCR PP-OCRv5 for scene-text detection/recognition and merges nearby subtitle lines before translation."
     },
     "worker": {
         "host": "0.0.0.0",
@@ -97,7 +114,7 @@
         "max_upload_mb": 20,
         "load_models_on_startup": true,
         "allowed_extensions": [".jpg", ".jpeg", ".png", ".webp"],
-        "note": "FastAPI worker using hybrid OCR and the strong MT checkpoint."
+        "note": "FastAPI worker using PaddleOCR PP-OCRv5 and the strong MT checkpoint."
     },
     "render": {
         "font_path": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",

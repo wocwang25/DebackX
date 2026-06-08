@@ -19,7 +19,7 @@ The active dataset root is `IIMT30k_Vi/Arial`.
 
 Fine-tune `microsoft/trocr-base-printed` on cropped English text regions from `IIMT30k_Vi/Arial/{train,val}/en`.
 
-TrOCR large was tested but overfit heavily on this dataset, so the production OCR path uses the base checkpoint that generalizes better.
+TrOCR large was tested but overfit heavily on this dataset, so the dataset OCR benchmark uses the base checkpoint that generalizes better.
 
 `Translation`
 
@@ -66,13 +66,15 @@ The main config uses:
 
 ```text
 Translation: facebook/nllb-200-1.3B
-OCR:         microsoft/trocr-base-printed + hybrid real-image OCR
+Dataset OCR: microsoft/trocr-base-printed
+Real image OCR: PaddleOCR PP-OCRv5
 ```
 
 It also enables application-quality rendering:
 
 ```text
-hybrid OCR for large real images
+PaddleOCR PP-OCRv5 for large real images
+merge nearby subtitle lines before translation
 lower text-box opacity
 text stroke/outline
 adaptive text color from the original English image
@@ -109,6 +111,15 @@ python3 -m venv .venv
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 ```
+
+For the stronger real-image OCR backend, install PaddleOCR as well:
+
+```bash
+python3 -m pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
+python3 -m pip install -r requirements-paddleocr.txt
+```
+
+If the server does not use CUDA 11.8, choose the PaddlePaddle wheel that matches the server CUDA version.
 
 Check whether the machine and dataset are ready:
 
@@ -231,19 +242,20 @@ Recommended production/demo path:
 
 ```text
 MT:     models/mt-nllb-1p3b-en-vi/best
-OCR:    models/ocr-trocr-en/best
+Real-image OCR: PaddleOCR PP-OCRv5
+Dataset OCR:    models/ocr-trocr-en/best
 Render: configs/config-pipeline-strong.json adaptive render settings
 ```
 
-For uploaded images, OCR uses hybrid recognition:
+For uploaded images, OCR uses PaddleOCR PP-OCRv5:
 
 ```text
-EasyOCR detects text boxes and reads text
-if EasyOCR confidence >= 0.65, use EasyOCR text
-otherwise crop the polygon, upscale/enhance it, then read with TrOCR base
+PP-OCRv5_server_det detects scene-text boxes
+en_PP-OCRv5_mobile_rec recognizes English text
+nearby subtitle lines are merged before translation
 ```
 
-This is more robust for large images because the uploaded-image domain is less clean than the IIMT crop dataset.
+This is more robust for large images because uploaded images are scene-text data, while TrOCR was trained here on clean cropped text regions.
 
 The renderer now improves visual quality with:
 
@@ -401,7 +413,7 @@ outputs/real_images_strong/english-image.vi.png.json  # boxes, OCR text, transla
 This path adds the two parts that the dataset benchmark does not need:
 
 ```text
-EasyOCR text detection -> finds text boxes in the uploaded image
+PaddleOCR PP-OCRv5 -> finds and reads text in the uploaded image
 OpenCV inpainting -> removes the original English text before rendering Vietnamese
 ```
 
@@ -426,7 +438,7 @@ Default server:
 http://0.0.0.0:8000
 ```
 
-The worker loads EasyOCR, TrOCR base, and NLLB 1.3B once at startup and keeps them in memory. In real-image mode, EasyOCR is also used as a high-confidence OCR fallback before TrOCR. If you want to start the API before checkpoints exist, set `worker.load_models_on_startup` to `false` in `configs/config-pipeline-strong.json`; the first translation job will load the models lazily.
+The worker loads PaddleOCR PP-OCRv5 and NLLB 1.3B once at startup and keeps them in memory. TrOCR base is still kept for the dataset OCR benchmark, but the real-image worker no longer depends on TrOCR for OCR quality. If you want to start the API before checkpoints exist, set `worker.load_models_on_startup` to `false` in `configs/config-pipeline-strong.json`; the first translation job will load the models lazily.
 
 Health check:
 
