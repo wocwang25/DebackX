@@ -37,7 +37,7 @@ def resolve_from_config(config_path, raw_path):
     return (config_path.parent / path).resolve()
 
 
-CONFIG_PATH = os.environ.get("IIMT_CONFIG", "configs/config-pipeline.json")
+CONFIG_PATH = os.environ.get("IIMT_CONFIG", "configs/config-pipeline-strong.json")
 CONFIG, CONFIG_FILE = load_json_config(CONFIG_PATH)
 WORKER_CONFIG = CONFIG.get("worker", {})
 OUTPUT_DIR = resolve_from_config(CONFIG_FILE, WORKER_CONFIG.get("output_dir", "../outputs/worker"))

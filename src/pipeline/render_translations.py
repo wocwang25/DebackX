@@ -212,7 +212,7 @@ def render_split(config, config_path, split, translations_file=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Render translated text back into background images.")
-    parser.add_argument("--config", default="configs/config-pipeline.json")
+    parser.add_argument("--config", default="configs/config-pipeline-strong.json")
     parser.add_argument("--split", default="test")
     parser.add_argument("--translations", default=None, help="Optional one-line-per-image translated text file.")
     args = parser.parse_args()

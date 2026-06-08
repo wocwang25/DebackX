@@ -1,6 +1,6 @@
 # Pipeline Config
 
-The active configuration is:
+The active application configuration is:
 
 ```text
 configs/config-pipeline-strong.json
@@ -10,45 +10,33 @@ configs/config-pipeline-strong.json
 
 `dataset`
 
-Controls the IIMT-style dataset root, split names, language names, and image size.
-
-`ocr`
-
-Controls OCR crop generation and TrOCR fine-tuning. `train_output_dir` receives cropped text regions and `labels.tsv` files. `checkpoint_dir` receives the fine-tuned OCR model.
+Controls the IIMT-style dataset root, split names, language names, and image/background locations used for translation training and benchmark rendering.
 
 `translation`
 
-Controls NLLB fine-tuning for English to Vietnamese subtitle translation. `checkpoint_dir` receives the fine-tuned MT model.
-
-`inpainting`
-
-For benchmark/evaluation on `IIMT30k_Vi`, clean backgrounds are available in the dataset. For real images, use an inpainting model such as LaMa with masks from OCR boxes.
+Controls NLLB 1.3B fine-tuning for English to Vietnamese text translation. `checkpoint_dir` receives the trained MT model.
 
 `real_image`
 
-Controls the deployable worker path for user-uploaded images. The strong config uses PaddleOCR PP-OCRv5 for scene-text detection and recognition, the fine-tuned NLLB checkpoint for translation, OpenCV inpainting to remove old text, and the render config to insert Vietnamese text.
-
-For subtitle-like images, `merge_text_regions` groups nearby OCR lines into one text block before translation so the MT model receives a complete sentence instead of isolated words or short fragments.
+Controls the deployable image translation path. The strong config uses PaddleOCR PP-OCRv5 for scene-text detection/recognition, the fine-tuned NLLB checkpoint for translation, OpenCV inpainting to remove old text, and the render config to insert Vietnamese text.
 
 `worker`
 
-Controls the FastAPI backend worker: upload limit, output directory, allowed image extensions, and whether OCR/MT models are loaded during startup.
+Controls the FastAPI backend worker: upload limit, output directory, allowed image extensions, and whether models are loaded during startup.
 
 `render`
 
-Controls font, text color, box color, opacity, padding, and output directory for inserting Vietnamese text back into images.
+Controls font, adaptive text color, stroke, box opacity, padding, and output directory for inserting Vietnamese text back into images.
 
-## Training Defaults
+## Main Runtime
 
-The current defaults target an A100 GPU:
+The production worker uses:
 
 ```text
-ocr.precision = bf16
-translation.precision = bf16
+PaddleOCR PP-OCRv5
+models/mt-nllb-1p3b-en-vi/best
+OpenCV inpainting
+adaptive text renderer
 ```
 
-Run the preflight check before training:
-
-```bash
-sh scripts/check-training-env.sh
-```
+OCR training is not part of the production flow.

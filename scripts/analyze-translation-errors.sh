@@ -3,10 +3,10 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-CONFIG="${CONFIG:-configs/config-pipeline.json}"
+CONFIG="${CONFIG:-configs/config-pipeline-strong.json}"
 SPLIT="${SPLIT:-test}"
-PREDICTIONS="${PREDICTIONS:-outputs/mt/${SPLIT}.pred.vi.txt}"
-OUTPUT="${OUTPUT:-outputs/mt/${SPLIT}.translation-errors.tsv}"
+PREDICTIONS="${PREDICTIONS:-outputs/mt/${SPLIT}.1p3b.pred.vi.txt}"
+OUTPUT="${OUTPUT:-outputs/mt/${SPLIT}.1p3b.translation-errors.tsv}"
 TOP="${TOP:-200}"
 
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/analyze-translation-errors.py \

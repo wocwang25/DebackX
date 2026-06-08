@@ -3,11 +3,11 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-CONFIG="${CONFIG:-configs/config-pipeline.json}"
-CHECKPOINT="${CHECKPOINT:-models/mt-nllb-en-vi/best}"
+CONFIG="${CONFIG:-configs/config-pipeline-strong.json}"
+CHECKPOINT="${CHECKPOINT:-models/mt-nllb-1p3b-en-vi/best}"
 SPLIT="${SPLIT:-test}"
 INPUT="${INPUT:-}"
-TAG="${TAG:-variant}"
+TAG="${TAG:-1p3b}"
 BEAMS="${BEAMS:-4 5 6}"
 LENGTH_PENALTIES="${LENGTH_PENALTIES:-0.9 1.0 1.1}"
 

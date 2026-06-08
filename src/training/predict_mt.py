@@ -96,8 +96,8 @@ def predict(
 
 def main():
     parser = argparse.ArgumentParser(description="Generate Vietnamese translations with a fine-tuned MT model.")
-    parser.add_argument("--config", default="configs/config-pipeline.json")
-    parser.add_argument("--checkpoint", default="models/mt-nllb-en-vi/best")
+    parser.add_argument("--config", default="configs/config-pipeline-strong.json")
+    parser.add_argument("--checkpoint", default="models/mt-nllb-1p3b-en-vi/best")
     parser.add_argument("--split", default="test")
     parser.add_argument("--output", default="outputs/mt/test.pred.vi.txt")
     parser.add_argument("--input", default=None, help="Optional English text file, one line per image.")

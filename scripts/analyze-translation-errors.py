@@ -48,7 +48,7 @@ def sentence_score(prediction, reference):
 
 def main():
     parser = argparse.ArgumentParser(description="Rank translation predictions by sentence-level chrF.")
-    parser.add_argument("--config", default="configs/config-pipeline.json")
+    parser.add_argument("--config", default="configs/config-pipeline-strong.json")
     parser.add_argument("--split", default="test")
     parser.add_argument("--predictions", default="outputs/mt/test.pred.vi.txt")
     parser.add_argument("--output", default="outputs/mt/test.translation-errors.tsv")

@@ -214,7 +214,7 @@ def train(config_path, seed):
 
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune NLLB for English to Vietnamese subtitles.")
-    parser.add_argument("--config", default="configs/config-pipeline.json")
+    parser.add_argument("--config", default="configs/config-pipeline-strong.json")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     train(args.config, args.seed)

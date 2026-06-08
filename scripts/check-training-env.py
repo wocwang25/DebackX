@@ -64,19 +64,25 @@ def check_cuda():
     print(f"[info] bf16 supported: {torch.cuda.is_bf16_supported()}")
 
 
-def check_dependencies():
-    for name in [
+def check_dependencies(config):
+    names = [
         "transformers",
         "PIL",
         "sentencepiece",
         "sacrebleu",
         "cv2",
-        "easyocr",
         "fastapi",
         "uvicorn",
         "multipart",
         "tqdm",
-    ]:
+    ]
+    detector = config.get("real_image", {}).get("detector", "paddleocr")
+    if detector == "paddleocr":
+        names.extend(["paddle", "paddleocr"])
+    elif detector == "easyocr":
+        names.append("easyocr")
+
+    for name in names:
         ok, version = check_module(name)
         status = "ok" if ok else "missing"
         print(f"[{status}] {name}: {version}")
@@ -113,6 +119,8 @@ def check_dataset(config, config_path):
 
 
 def check_ocr_labels(config, config_path):
+    if "ocr" not in config:
+        return
     output_root = resolve(config_path, config["ocr"]["train_output_dir"])
     label_name = config["ocr"].get("label_file", "labels.tsv")
     for split in config["dataset"]["splits"]:
@@ -136,7 +144,14 @@ def check_real_image(config, config_path):
     if not real_config:
         return
 
-    for label, key in [("ocr checkpoint", "ocr_checkpoint"), ("mt checkpoint", "mt_checkpoint")]:
+    checks = [("mt checkpoint", "mt_checkpoint")]
+    if real_config.get("recognizer") in {"trocr", "hybrid"}:
+        checks.insert(0, ("ocr checkpoint", "ocr_checkpoint"))
+
+    for label, key in checks:
+        if key not in real_config:
+            print(f"[warn] real-image {label} is not configured")
+            continue
         checkpoint = resolve(config_path, real_config[key])
         if checkpoint.exists():
             print(f"[ok] real-image {label}: {checkpoint}")
@@ -160,7 +175,7 @@ def check_worker(config, config_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Check whether the IIMT training workspace is ready.")
-    parser.add_argument("--config", default="configs/config-pipeline.json")
+    parser.add_argument("--config", default="configs/config-pipeline-strong.json")
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -168,7 +183,7 @@ def main():
         config = json.load(config_file)
 
     check_cuda()
-    check_dependencies()
+    check_dependencies(config)
     check_dataset(config, config_path)
     check_ocr_labels(config, config_path)
     check_render(config)

@@ -3,8 +3,8 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-CONFIG="${CONFIG:-configs/config-pipeline.json}"
-CHECKPOINT="${CHECKPOINT:-models/mt-nllb-en-vi/best}"
+CONFIG="${CONFIG:-configs/config-pipeline-strong.json}"
+CHECKPOINT="${CHECKPOINT:-models/mt-nllb-1p3b-en-vi/best}"
 SPLIT="${SPLIT:-test}"
 OUTPUT="${OUTPUT:-outputs/mt/${SPLIT}.pred.vi.txt}"
 INPUT="${INPUT:-}"

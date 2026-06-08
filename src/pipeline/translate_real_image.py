@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 
 import cv2
-import easyocr
 import numpy as np
 import torch
 from PIL import Image, ImageEnhance
@@ -370,7 +369,7 @@ class RealImageTranslator:
     def __init__(self, config_path, lazy=False):
         self.config, self.config_file = load_config(config_path)
         self.real_config = self.config["real_image"]
-        self.ocr_config = self.config["ocr"]
+        self.ocr_config = self.config.get("ocr", {})
         self.mt_config = self.config["translation"]
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -386,7 +385,7 @@ class RealImageTranslator:
 
     @property
     def detector_backend(self):
-        return self.real_config.get("detector", "easyocr")
+        return self.real_config.get("detector", "paddleocr")
 
     @property
     def recognizer_backend(self):
@@ -402,7 +401,10 @@ class RealImageTranslator:
 
     @property
     def ocr_checkpoint(self):
-        checkpoint = resolve_from_config(self.config_file, self.real_config["ocr_checkpoint"])
+        raw_checkpoint = self.real_config.get("ocr_checkpoint")
+        if not raw_checkpoint:
+            return None
+        checkpoint = resolve_from_config(self.config_file, raw_checkpoint)
         fallback = self.real_config.get("fallback_ocr_checkpoint")
         if checkpoint.exists() or not fallback:
             return checkpoint
@@ -419,18 +421,21 @@ class RealImageTranslator:
         return self.output_dir / f"{input_path.stem}.vi.png"
 
     def health(self):
-        return {
+        payload = {
             "device": str(self.device),
             "cuda_available": torch.cuda.is_available(),
             "detector": self.detector_backend,
             "recognizer": self.recognizer_backend,
-            "ocr_checkpoint": str(self.ocr_checkpoint),
-            "ocr_checkpoint_exists": self.ocr_checkpoint.exists(),
             "mt_checkpoint": str(self.mt_checkpoint),
             "mt_checkpoint_exists": self.mt_checkpoint.exists(),
             "models_loaded": self.models_loaded,
             "output_dir": str(self.output_dir),
         }
+        if self.uses_trocr_recognizer:
+            checkpoint = self.ocr_checkpoint
+            payload["ocr_checkpoint"] = str(checkpoint) if checkpoint else None
+            payload["ocr_checkpoint_exists"] = bool(checkpoint and checkpoint.exists())
+        return payload
 
     @property
     def models_loaded(self):
@@ -450,6 +455,14 @@ class RealImageTranslator:
             return
 
         if self.detector_backend == "easyocr":
+            try:
+                import easyocr
+            except ImportError as exc:
+                raise ImportError(
+                    "EasyOCR backend is enabled but easyocr is not installed. "
+                    "Use the PaddleOCR strong config or install easyocr for the legacy backend."
+                ) from exc
+
             self.detector = easyocr.Reader(
                 self.real_config.get("detector_languages", ["en"]),
                 gpu=bool(self.real_config.get("detector_gpu", True)) and torch.cuda.is_available(),
@@ -498,6 +511,8 @@ class RealImageTranslator:
         if self.ocr_model is not None and self.ocr_processor is not None:
             return
         checkpoint = self.ocr_checkpoint
+        if checkpoint is None:
+            raise ValueError("TrOCR recognizer is enabled but real_image.ocr_checkpoint is not configured.")
         if not checkpoint.exists():
             raise FileNotFoundError(f"OCR checkpoint not found: {checkpoint}. Train OCR first.")
         self.ocr_processor = TrOCRProcessor.from_pretrained(checkpoint)
@@ -592,7 +607,7 @@ class RealImageTranslator:
         dataset = CropDataset(image, regions, self.real_config)
         dataloader = DataLoader(
             dataset,
-            batch_size=self.ocr_config["eval_batch_size"],
+            batch_size=int(self.ocr_config.get("eval_batch_size", 8)),
             shuffle=False,
             collate_fn=OcrCollator(self.ocr_processor),
             pin_memory=torch.cuda.is_available(),
@@ -606,7 +621,7 @@ class RealImageTranslator:
             with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp(precision)):
                 generated = self.ocr_model.generate(
                     pixel_values,
-                    max_length=self.ocr_config["max_target_length"],
+                    max_length=int(self.ocr_config.get("max_target_length", 128)),
                     num_beams=4,
                 )
             decoded = self.ocr_processor.batch_decode(generated, skip_special_tokens=True)
@@ -703,7 +718,7 @@ def process_image(config_path, input_path, output, metadata):
 
 def main():
     parser = argparse.ArgumentParser(description="Translate English text in a real image into Vietnamese.")
-    parser.add_argument("--config", default="configs/config-pipeline.json")
+    parser.add_argument("--config", default="configs/config-pipeline-strong.json")
     parser.add_argument("--input", required=True, help="Input image path.")
     parser.add_argument("--output", default=None, help="Output image path. Defaults to real_image.output_dir.")
     parser.add_argument("--metadata", default=None, help="Output metadata JSON path.")
