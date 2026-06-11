@@ -3,6 +3,8 @@ FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV CONFIG=configs/config-pipeline-strong.json
+ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 
 WORKDIR /app
 
@@ -40,7 +42,14 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip \
 COPY configs configs
 COPY scripts scripts
 COPY src src
+COPY models/mt-nllb-1p3b-en-vi/best models/mt-nllb-1p3b-en-vi/best
+COPY vendor/paddlex/official_models /root/.paddlex/official_models
+
+RUN mkdir -p outputs/worker_strong
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=30s --start-period=180s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=20).read()"
 
 CMD ["sh", "scripts/run-worker.sh"]

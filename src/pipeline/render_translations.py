@@ -8,6 +8,16 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageStat
 from common import clamp_box, dataset_root, load_config, numeric_jpgs, output_path, parse_box, read_lines
 
 
+def load_font(font_path, font_size):
+    try:
+        return ImageFont.truetype(font_path, font_size, encoding="utf-8")
+    except OSError as exc:
+        raise FileNotFoundError(
+            f"render font not found or unreadable: {font_path}. "
+            "Install fonts-dejavu-core in the worker image or update render.font_path."
+        ) from exc
+
+
 def text_size(draw, text, font):
     x1, y1, x2, y2 = draw.textbbox((0, 0), text, font=font)
     return x2 - x1, y2 - y1
@@ -59,7 +69,7 @@ def fit_text(draw, text, box_width, box_height, render_config):
     max_text_height = max(1, box_height - 2 * vpad)
 
     for font_size in range(max_size, min_size - 1, -1):
-        font = ImageFont.truetype(font_path, font_size, encoding="utf-8")
+        font = load_font(font_path, font_size)
         lines = wrap_text(draw, text, font, max_text_width)
         _, line_height = text_size(draw, "Ay", font)
         total_height = line_height * len(lines)
@@ -67,7 +77,7 @@ def fit_text(draw, text, box_width, box_height, render_config):
         if widest <= max_text_width and total_height <= max_text_height:
             return font, lines, line_height
 
-    font = ImageFont.truetype(font_path, min_size, encoding="utf-8")
+    font = load_font(font_path, min_size)
     return font, wrap_text(draw, text, font, max_text_width), text_size(draw, "Ay", font)[1]
 
 

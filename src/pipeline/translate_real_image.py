@@ -320,8 +320,15 @@ class TextDataset(Dataset):
 def make_mask(image_size, regions, real_config):
     width, height = image_size
     mask = np.zeros((height, width), dtype=np.uint8)
-    padding = int(real_config.get("box_padding", 0))
+    padding = int(real_config.get("mask_padding", real_config.get("box_padding", 0)))
+    mask_regions = []
     for region in regions:
+        if real_config.get("mask_merged_sources", True) and region.get("merged_from"):
+            mask_regions.extend(region["merged_from"])
+        else:
+            mask_regions.append(region)
+
+    for region in mask_regions:
         if real_config.get("mask_from_polygon", True) and region.get("polygon"):
             points = np.array(region["polygon"], dtype=np.float32)
             points[:, 0] = np.clip(points[:, 0], 0, width - 1)

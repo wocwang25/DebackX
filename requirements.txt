@@ -1,14 +1,22 @@
+# Lõi xử lý ảnh và tiện ích
 Pillow==10.4.0
 sentencepiece==0.2.0
 numpy==1.24.4
 tqdm==4.66.2
 opencv-python-headless==4.10.0.84
-torch==2.0.1
-torchvision==0.15.2
-transformers==4.39.2
-tokenizers==0.15.2
-safetensors==0.4.2
+
+# Deep Learning (CUDA 11.8 wheels for the GPU worker)
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.1.2+cu118
+torchvision==0.16.2+cu118
+
+# NLP & Trích xuất (Đã nâng cấp để tránh lỗi xung đột tokenizers với PaddleOCR)
+transformers==4.44.0
+tokenizers==0.19.1
+safetensors==0.4.3
 sacrebleu==2.4.2
+
+# Backend API
 fastapi==0.110.2
 uvicorn[standard]==0.29.0
 python-multipart==0.0.9
