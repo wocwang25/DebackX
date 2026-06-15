@@ -1,10 +1,17 @@
 {
     "dataset": {
         "root": "../IIMT30k_Vi/Arial",
-        "splits": ["train", "val", "test"],
+        "splits": [
+            "train",
+            "val",
+            "test"
+        ],
         "source_lang": "en",
         "target_lang": "vi",
-        "image_size": [512, 48]
+        "image_size": [
+            512,
+            48
+        ]
     },
     "translation": {
         "backend": "nllb",
@@ -77,27 +84,44 @@
     },
     "worker": {
         "host": "0.0.0.0",
-        "port": 8000,
+        "port": 8081,
         "output_dir": "../outputs/worker_strong",
         "max_upload_mb": 20,
         "load_models_on_startup": true,
-        "allowed_extensions": [".jpg", ".jpeg", ".png", ".webp"],
+        "allowed_extensions": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+        ],
         "note": "FastAPI worker using PaddleOCR PP-OCRv5 and the strong MT checkpoint."
     },
     "render": {
         "font_path": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "min_font_size": 8,
         "max_font_size": 24,
-        "text_color": [255, 255, 255],
+        "text_color": [
+            255,
+            255,
+            255
+        ],
         "adaptive_text_color": true,
         "fallback_to_contrast_text": true,
         "style_diff_threshold": 30,
         "style_min_pixels": 8,
         "stroke_width": 1,
-        "stroke_color": [0, 0, 0],
+        "stroke_color": [
+            0,
+            0,
+            0
+        ],
         "adaptive_stroke_color": true,
-        "box_color": [0, 0, 0],
-        "box_alpha": 0.0,
+        "box_color": [
+            0,
+            0,
+            0
+        ],
+        "box_alpha": 0.25,
         "horizontal_padding": 4,
         "vertical_padding": 2,
         "output_dir": "../outputs/rendered_strong"

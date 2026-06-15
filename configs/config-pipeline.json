@@ -1,10 +1,17 @@
 {
     "dataset": {
         "root": "../IIMT30k_Vi/Arial",
-        "splits": ["train", "val", "test"],
+        "splits": [
+            "train",
+            "val",
+            "test"
+        ],
         "source_lang": "en",
         "target_lang": "vi",
-        "image_size": [512, 48]
+        "image_size": [
+            512,
+            48
+        ]
     },
     "ocr": {
         "task": "recognize_text_inside_known_or_detected_box",
@@ -59,7 +66,9 @@
     },
     "real_image": {
         "detector": "easyocr",
-        "detector_languages": ["en"],
+        "detector_languages": [
+            "en"
+        ],
         "detector_gpu": true,
         "detector_text_threshold": 0.5,
         "detector_low_text": 0.3,
@@ -92,22 +101,39 @@
         "output_dir": "../outputs/worker",
         "max_upload_mb": 20,
         "load_models_on_startup": true,
-        "allowed_extensions": [".jpg", ".jpeg", ".png", ".webp"],
+        "allowed_extensions": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+        ],
         "note": "FastAPI worker for backend integration. Mount output_dir as /files and keep OCR/MT models loaded in memory."
     },
     "render": {
         "font_path": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "min_font_size": 8,
         "max_font_size": 24,
-        "text_color": [255, 255, 255],
+        "text_color": [
+            255,
+            255,
+            255
+        ],
         "adaptive_text_color": true,
         "fallback_to_contrast_text": true,
         "style_diff_threshold": 30,
         "style_min_pixels": 8,
         "stroke_width": 1,
-        "stroke_color": [0, 0, 0],
+        "stroke_color": [
+            0,
+            0,
+            0
+        ],
         "adaptive_stroke_color": true,
-        "box_color": [0, 0, 0],
+        "box_color": [
+            0,
+            0,
+            0
+        ],
         "box_alpha": 0.28,
         "horizontal_padding": 4,
         "vertical_padding": 2,

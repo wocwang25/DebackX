@@ -194,32 +194,32 @@ sh scripts/run-worker.sh
 Default server:
 
 ```text
-http://0.0.0.0:8000
+http://0.0.0.0:8081
 ```
 
 Health check:
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8081/health
 ```
 
 Create an async translation job:
 
 ```bash
-curl -X POST http://localhost:8000/jobs \
+curl -X POST http://localhost:8081/jobs \
   -F "file=@path/to/english-image.jpg"
 ```
 
 Check job status:
 
 ```bash
-curl http://localhost:8000/jobs/<job_id>
+curl http://localhost:8081/jobs/<job_id>
 ```
 
 Run a synchronous translation request for demos:
 
 ```bash
-curl -X POST http://localhost:8000/translate \
+curl -X POST http://localhost:8081/translate \
   -F "file=@path/to/english-image.jpg"
 ```
 
@@ -245,7 +245,7 @@ Build and run the GPU worker:
 
 ```bash
 docker build -f Dockerfile.worker -t iimt-worker .
-docker run --gpus all --rm -p 8000:8000 \
+docker run --gpus all --rm -p 8081:8081 \
   -e CONFIG=configs/config-pipeline-strong.json \
   -v "$(pwd)/models:/app/models" \
   -v "$(pwd)/outputs:/app/outputs" \
