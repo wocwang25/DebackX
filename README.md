@@ -143,6 +143,40 @@ outputs/mt/test.1p3b.beam6.lp1p1.pred.vi.txt
 
 Pick the best-looking translation file by checking its `.errors.tsv` and rendered images.
 
+### Quantitative Evaluation Status
+
+The repository already contains partial quantitative results for the strong
+pipeline, but it does not yet contain a complete final evaluation table for a
+thesis-style report. The currently available numbers are:
+
+| Component | Metric | Value | Source |
+| --- | ---: | ---: | --- |
+| MT fine-tuned NLLB 1.3B | chrF | 52.95 | `models/mt-nllb-1p3b-en-vi/best/eval.json` |
+| MT fine-tuned NLLB 600M | chrF | 52.09 | `models/mt-nllb-en-vi/best/eval.json` |
+| PaddleOCR on test split | CER | 20.70% | `outputs/ocr/en/test.pred.en.metrics.json` |
+| PaddleOCR on test split | WER | 21.89% | `outputs/ocr/en/test.pred.en.metrics.json` |
+| MT test predictions | Samples | 1,500 | `outputs/mt/test.1p3b.pred.vi.txt` |
+| OCR test predictions | Samples | 1,500 | `outputs/ocr/en/test.pred.en.metrics.json` |
+
+For the final report, the project should still add a dedicated benchmark table
+with the following measurements:
+
+| Evaluation item | Required result | Current status |
+| --- | --- | --- |
+| BLEU / chrF on the official test set | Corpus-level BLEU and chrF for `outputs/mt/test.1p3b.pred.vi.txt` against the official Vietnamese references | Not yet summarized in README |
+| Base NLLB vs fine-tuned model | Direct comparison between the original NLLB checkpoint and the fine-tuned checkpoint on the same test set | Not yet recorded |
+| OCR accuracy in the strong pipeline | CER/WER for PaddleOCR PP-OCRv5 when used by `configs/config-pipeline-strong.json` | CER/WER available, but not yet presented as a final table |
+| Average latency per image | Mean, p50, and p95 processing time for one image from upload to rendered output | Not yet measured |
+| VRAM/RAM usage | Peak GPU memory and system RAM during worker inference | Not yet measured |
+| Worker throughput | Images per minute or requests per second with the production worker configuration | Not yet measured |
+| End-to-end image quality | Human or rubric-based score for OCR correctness, translation adequacy, text removal, and rendered-text readability | Not yet measured |
+
+This means the current model is usable for an application-oriented graduation
+project, but the evaluation section should be completed before the final
+submission. The strongest report format is to present MT quality, OCR quality,
+runtime cost, and visual end-to-end quality in one consolidated table, then show
+several representative success and failure cases.
+
 ### 4. Render Benchmark Images
 
 Render translations onto the clean benchmark backgrounds:
@@ -191,6 +225,12 @@ Start the FastAPI worker:
 sh scripts/run-worker.sh
 ```
 
+If the worker is public or runs on a separate GPU host, protect it with a shared API key:
+
+```bash
+IIMT_WORKER_API_KEY="<shared-secret>" sh scripts/run-worker.sh
+```
+
 Default server:
 
 ```text
@@ -207,19 +247,22 @@ Create an async translation job:
 
 ```bash
 curl -X POST http://localhost:8081/jobs \
+  -H "Authorization: Bearer <shared-secret>" \
   -F "file=@path/to/english-image.jpg"
 ```
 
 Check job status:
 
 ```bash
-curl http://localhost:8081/jobs/<job_id>
+curl http://localhost:8081/jobs/<job_id> \
+  -H "Authorization: Bearer <shared-secret>"
 ```
 
 Run a synchronous translation request for demos:
 
 ```bash
 curl -X POST http://localhost:8081/translate \
+  -H "Authorization: Bearer <shared-secret>" \
   -F "file=@path/to/english-image.jpg"
 ```
 
@@ -247,6 +290,7 @@ Build and run the GPU worker:
 docker build -f Dockerfile.worker -t iimt-worker .
 docker run --gpus all --rm -p 8081:8081 \
   -e CONFIG=configs/config-pipeline-strong.json \
+  -e IIMT_WORKER_API_KEY="<shared-secret>" \
   -v "$(pwd)/models:/app/models" \
   -v "$(pwd)/outputs:/app/outputs" \
   iimt-worker

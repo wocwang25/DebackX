@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import sys
 import threading
 import uuid
@@ -7,8 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
-from fastapi.staticfiles import StaticFiles
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -46,16 +47,48 @@ UPLOADS_DIR = OUTPUT_DIR / "uploads"
 RESULTS_DIR = OUTPUT_DIR / "results"
 ALLOWED_EXTENSIONS = set(WORKER_CONFIG.get("allowed_extensions", [".jpg", ".jpeg", ".png", ".webp"]))
 MAX_UPLOAD_BYTES = int(WORKER_CONFIG.get("max_upload_mb", 20)) * 1024 * 1024
+WORKER_API_KEY = os.environ.get("IIMT_WORKER_API_KEY") or os.environ.get("WORKER_API_KEY")
+PROTECT_HEALTH = os.environ.get("IIMT_WORKER_PROTECT_HEALTH", "false").lower() in {"1", "true", "yes"}
 
 for directory in [OUTPUT_DIR, JOBS_DIR, UPLOADS_DIR, RESULTS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="IIMT English-Vietnamese Worker", version="1.0.0")
-app.mount("/files", StaticFiles(directory=str(OUTPUT_DIR)), name="files")
 
 translator = None
 translator_lock = threading.Lock()
 jobs_lock = threading.Lock()
+
+
+def _extract_bearer(authorization):
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
+
+
+def require_worker_key(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+):
+    if not WORKER_API_KEY:
+        return
+    bearer_token = _extract_bearer(authorization)
+    candidates = [token for token in (bearer_token, x_api_key) if token]
+    if any(secrets.compare_digest(token, WORKER_API_KEY) for token in candidates):
+        return
+    raise HTTPException(status_code=401, detail="Invalid worker API key")
+
+
+def require_health_key(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+):
+    if not PROTECT_HEALTH:
+        return
+    require_worker_key(authorization=authorization, x_api_key=x_api_key)
 
 
 def get_translator():
@@ -69,6 +102,17 @@ def output_url(path):
     path = Path(path).resolve()
     rel_path = path.relative_to(OUTPUT_DIR.resolve())
     return "/files/" + quote(rel_path.as_posix())
+
+
+def safe_output_path(file_path):
+    target = (OUTPUT_DIR / file_path).resolve()
+    try:
+        target.relative_to(OUTPUT_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="file not found")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    return target
 
 
 def job_file(job_id):
@@ -166,7 +210,7 @@ def startup():
 
 
 @app.get("/health")
-def health():
+def health(_auth=Depends(require_health_key)):
     service = get_translator()
     payload = service.health()
     payload.update(
@@ -176,13 +220,24 @@ def health():
             "worker_output_dir": str(OUTPUT_DIR),
             "max_upload_mb": WORKER_CONFIG.get("max_upload_mb", 20),
             "allowed_extensions": sorted(ALLOWED_EXTENSIONS),
+            "api_key_required": bool(WORKER_API_KEY),
+            "health_protected": PROTECT_HEALTH,
         }
     )
     return payload
 
 
+@app.get("/files/{file_path:path}")
+def get_output_file(file_path: str, _auth=Depends(require_worker_key)):
+    return FileResponse(safe_output_path(file_path))
+
+
 @app.post("/jobs", status_code=202)
-async def create_job(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def create_job(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    _auth=Depends(require_worker_key),
+):
     job_id = uuid.uuid4().hex
     input_path = await save_upload(file, job_id)
     job = new_job_record(job_id, input_path, mode="async")
@@ -197,12 +252,12 @@ async def create_job(background_tasks: BackgroundTasks, file: UploadFile = File(
 
 
 @app.get("/jobs/{job_id}")
-def get_job(job_id: str):
+def get_job(job_id: str, _auth=Depends(require_worker_key)):
     return read_job(job_id)
 
 
 @app.post("/translate")
-async def translate_now(file: UploadFile = File(...)):
+async def translate_now(file: UploadFile = File(...), _auth=Depends(require_worker_key)):
     job_id = uuid.uuid4().hex
     input_path = await save_upload(file, job_id)
     job = new_job_record(job_id, input_path, mode="sync")
