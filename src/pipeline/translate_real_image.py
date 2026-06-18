@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from pathlib import Path
 
 import cv2
@@ -225,27 +226,90 @@ def preprocess_ocr_crop(crop, real_config):
     return crop
 
 
+def sort_regions_by_reading_order(regions, vertical_overlap_threshold=0.5):
+    """
+    Sắp xếp các vùng chứa chữ theo thứ tự đọc tự nhiên của con người:
+    1. Nhóm các hộp chữ nằm trên cùng một dòng ngang (dựa trên độ chồng lấp chiều dọc).
+    2. Sắp xếp các dòng từ trên xuống dưới.
+    3. Trong mỗi dòng, sắp xếp các hộp chữ từ trái qua phải.
+    """
+    if not regions:
+        return []
+
+    # Sắp xếp sơ bộ theo y1 để dễ xử lý tuần tự
+    sorted_by_y = sorted(regions, key=lambda r: r["box"][1])
+    
+    lines = []
+    current_line = [sorted_by_y[0]]
+    
+    for r in sorted_by_y[1:]:
+        prev_r = current_line[-1]
+        prev_box = prev_r["box"]
+        curr_box = r["box"]
+        
+        # Tính toán độ chồng lấp chiều dọc (Vertical Overlap)
+        overlap = min(prev_box[3], curr_box[3]) - max(prev_box[1], curr_box[1])
+        h_prev = prev_box[3] - prev_box[1]
+        h_curr = curr_box[3] - curr_box[1]
+        min_h = min(h_prev, h_curr)
+        
+        if min_h > 0 and overlap / min_h >= vertical_overlap_threshold:
+            current_line.append(r)
+        else:
+            lines.append(current_line)
+            current_line = [r]
+            
+    if current_line:
+        lines.append(current_line)
+        
+    final_regions = []
+    for line in lines:
+        sorted_line = sorted(line, key=lambda r: r["box"][0])
+        final_regions.extend(sorted_line)
+        
+    for idx, r in enumerate(final_regions):
+        r["index"] = idx
+        
+    return final_regions
+
+
 def merge_text_regions(regions, real_config):
     if not real_config.get("merge_text_regions", False) or len(regions) < 2:
         return regions
 
-    max_gap_ratio = float(real_config.get("merge_line_gap_ratio", 1.6))
-    max_gap_px = float(real_config.get("merge_line_gap_px", 18))
-    regions = sorted(regions, key=lambda region: (region["box"][1], region["box"][0]))
+    # Kiểm tra xem các vùng chữ có cấu trúc sentence_id được cung cấp bởi LLM không
+    has_sentence_ids = all("sentence_id" in r for r in regions)
+    
     groups = []
-    current_group = [regions[0]]
-
-    for region in regions[1:]:
-        previous = current_group[-1]
-        previous_height = region_height(previous)
-        y_gap = float(region["box"][1]) - float(previous["box"][3])
-        max_allowed_gap = max(max_gap_px, previous_height * max_gap_ratio)
-        if y_gap <= max_allowed_gap:
-            current_group.append(region)
-        else:
-            groups.append(current_group)
-            current_group = [region]
-    groups.append(current_group)
+    if has_sentence_ids:
+        # Nhóm theo sentence_id nhưng giữ nguyên thứ tự sắp xếp hiện tại
+        current_id = regions[0]["sentence_id"]
+        current_group = [regions[0]]
+        for region in regions[1:]:
+            if region["sentence_id"] == current_id:
+                current_group.append(region)
+            else:
+                groups.append(current_group)
+                current_id = region["sentence_id"]
+                current_group = [region]
+        groups.append(current_group)
+    else:
+        # Sử dụng thuật toán so sánh khoảng cách dọc (y_gap)
+        max_gap_ratio = float(real_config.get("merge_line_gap_ratio", 1.6))
+        max_gap_px = float(real_config.get("merge_line_gap_px", 18))
+        
+        current_group = [regions[0]]
+        for region in regions[1:]:
+            previous = current_group[-1]
+            previous_height = region_height(previous)
+            y_gap = float(region["box"][1]) - float(previous["box"][3])
+            max_allowed_gap = max(max_gap_px, previous_height * max_gap_ratio)
+            if y_gap <= max_allowed_gap:
+                current_group.append(region)
+            else:
+                groups.append(current_group)
+                current_group = [region]
+        groups.append(current_group)
 
     merged_regions = []
     for group_index, group in enumerate(groups):
@@ -255,7 +319,7 @@ def merge_text_regions(regions, real_config):
             merged_regions.append(single)
             continue
 
-        group = sorted(group, key=lambda region: (region["box"][1], region["box"][0]))
+        # Giữ nguyên thứ tự đọc ban đầu khi vẽ
         box = union_box([region["box"] for region in group])
         text = " ".join(region_text(region) for region in group if region_text(region))
         confidence = min(float(region.get("detector_confidence", 1.0)) for region in group)
@@ -539,6 +603,50 @@ class RealImageTranslator:
         self.mt_forced_bos_token_id = self.mt_tokenizer.convert_tokens_to_ids(self.mt_config["target_code"])
         self.mt_model.to(self.device).eval()
 
+    def reconstruct_layout_and_sort(self, regions):
+        if not regions:
+            return []
+
+        # Đánh lại index ban đầu để ánh xạ
+        for idx, r in enumerate(regions):
+            r["index"] = idx
+
+        # Thử sử dụng LLM bổ trợ trước nếu có GOOGLE_API_KEY
+        if os.environ.get("GOOGLE_API_KEY"):
+            try:
+                from vlm_translator import GeminiLayoutHelper
+                helper = GeminiLayoutHelper()
+                if helper.is_available:
+                    layout = helper.reconstruct_layout(regions)
+                    if layout:
+                        # Tạo ánh xạ từ box_id sang sentence_id
+                        box_sentence_map = {b.box_id: b.sentence_id for b in layout.boxes}
+                        
+                        # Sắp xếp các vùng theo reading_order
+                        regions_by_id = {r["index"]: r for r in regions}
+                        sorted_regions = []
+                        for box_id in layout.reading_order:
+                            if box_id in regions_by_id:
+                                r = regions_by_id[box_id]
+                                r["sentence_id"] = box_sentence_map.get(box_id, 0)
+                                sorted_regions.append(r)
+                                
+                        # Thêm các vùng bị bỏ sót nếu có
+                        for r in regions:
+                            if r["index"] not in layout.reading_order:
+                                r["sentence_id"] = 999
+                                sorted_regions.append(r)
+                                
+                        # Đánh lại index sau khi sắp xếp đúng thứ tự đọc
+                        for idx, r in enumerate(sorted_regions):
+                            r["index"] = idx
+                        return sorted_regions
+            except Exception as exc:
+                print(f"[reconstruct_layout_and_sort] LLM failed: {exc}. Chuyển sang fallback thuật toán local.")
+
+        # Thuật toán local bổ trợ sắp xếp dọc-ngang
+        return sort_regions_by_reading_order(regions)
+
     def detect_text_regions(self, image_path):
         self.load_detector()
 
@@ -564,7 +672,7 @@ class RealImageTranslator:
                 raw_result = self.detector.ocr(str(image_path), cls=False)
                 regions = parse_legacy_paddleocr_result(raw_result, min_confidence)
 
-            regions.sort(key=lambda region: (region["box"][1], region["box"][0]))
+            regions = self.reconstruct_layout_and_sort(regions)
             return merge_text_regions(regions, self.real_config)
 
         detections = self.detector.readtext(
@@ -596,7 +704,7 @@ class RealImageTranslator:
                     "detector_confidence": confidence,
                 }
             )
-        regions.sort(key=lambda region: (region["box"][1], region["box"][0]))
+        regions = self.reconstruct_layout_and_sort(regions)
         return merge_text_regions(regions, self.real_config)
 
     @torch.no_grad()
